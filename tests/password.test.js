@@ -9,7 +9,7 @@ function setup(patch = {}) {
   const events = [], requests = [], messages = []
   const services = {
     auth: { getUser: async uid => ({ uid, email: 'membro@example.com', disabled: false, providerData: [{ providerId: 'password' }] }) },
-    db: { doc: path => { assert.equal(path, 'renovations/main/members/member'); return { get: async () => ({ exists: true, data: () => ({ active: true }) }) } } },
+    db: { doc: path => { assert.equal(path, 'users/member'); return { get: async () => ({ exists: true, data: () => ({ active: true }) }) } } },
     uid: 'member', input, apiKey: 'fake-key',
     fetchImpl: async (url, options) => { const body = JSON.parse(options.body); requests.push({ url, body }); events.push(url.includes('signInWithPassword') ? 'verify' : 'update'); return { ok: true, json: async () => ({ localId: 'member', idToken: 'temporary-token' }) } },
     sendNotice: async message => { events.push('email'); messages.push(message); return 'sent' },

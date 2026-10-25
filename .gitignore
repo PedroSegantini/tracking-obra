@@ -11,3 +11,6 @@ ui-debug.log*
 *-service-account*.json
 coverage/
 .DS_Store
+
+# Cópias locais de dados da migração
+.backups/

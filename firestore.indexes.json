@@ -9,7 +9,7 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "memberIds",
+          "fieldPath": "members",
           "arrayConfig": "CONTAINS"
         }
       ]

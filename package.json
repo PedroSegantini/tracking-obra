@@ -10,8 +10,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js tests/renovations.test.js tests/password.test.js tests/administration.test.js",
-    "test:rules": "node --test tests/rules.test.js",
+    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js tests/renovations.test.js tests/password.test.js tests/administration.test.js tests/schema-migration.test.js tests/schema-v3.test.js",
+    "test:rules": "node --test tests/rules.test.js tests/schema-integration.test.js tests/schema-v3-integration.test.js",
     "bootstrap": "node --env-file=.env.admin scripts/bootstrap-admin.mjs"
   },
   "dependencies": {

@@ -10,18 +10,18 @@ const form = reactive({ name: '', email: '', password: '', role: 'user' })
 const busy = ref(false), error = ref(''), modalError = ref('')
 const editingAccount = ref(null), accountDraft = reactive({ name: '', email: '', role: 'user' })
 const linking = ref(false), linkUid = ref(''), linkProject = ref('')
-const editingProject = ref(null), projectDraft = reactive({ name: '', memberIds: [] }), candidate = ref('')
+const editingProject = ref(null), projectDraft = reactive({ name: '', members: [] }), candidate = ref('')
 const removing = ref(null)
 const accounts = computed(() => store.members.filter(member => member.active !== false || member.deleting))
 const activeAccounts = computed(() => accounts.value.filter(member => member.active !== false))
 const memberOptions = computed(() => activeAccounts.value.map(member => ({ id: member.id, label: member.name, description: member.email })))
 const projectOptions = computed(() => store.renovations.map(project => ({ id: project.id, label: project.name })))
-const availableOptions = computed(() => memberOptions.value.filter(member => !projectDraft.memberIds.includes(member.id)))
-const draftMembers = computed(() => projectDraft.memberIds.map(uid => ({ id: uid, name: activeAccounts.value.find(member => member.id === uid)?.name || 'Membro indisponível' })))
+const availableOptions = computed(() => memberOptions.value.filter(member => !projectDraft.members.some(item => item.id === member.id)))
+const draftMembers = computed(() => projectDraft.members.map(({ id }) => ({ id, name: activeAccounts.value.find(member => member.id === id)?.name || 'Membro indisponível' })))
 let stop
 onMounted(() => { if (store.member?.role === 'admin') stop = watchMembers() })
 onBeforeUnmount(() => stop?.())
-function memberProjects(uid) { return store.renovations.filter(project => project.memberIds.includes(uid)).map(project => project.name).join(', ') }
+function memberProjects(uid) { return store.renovations.filter(project => project.members.some(member => member.id === uid)).map(project => project.name).join(', ') }
 async function submit() {
   if (busy.value) return
   busy.value = true; error.value = ''
@@ -46,8 +46,8 @@ async function saveLink() {
   try { await linkMemberToRenovation(linkUid.value, linkProject.value); linking.value = false; notify('Membro atrelado à reforma.') }
   catch (e) { modalError.value = errorMessage(e) } finally { busy.value = false }
 }
-function editProject(project) { modalError.value = ''; candidate.value = ''; editingProject.value = project; projectDraft.name = project.name; projectDraft.memberIds = [...project.memberIds] }
-function addDraftMember() { if (candidate.value && !projectDraft.memberIds.includes(candidate.value)) { projectDraft.memberIds.push(candidate.value); candidate.value = '' } }
+function editProject(project) { modalError.value = ''; candidate.value = ''; editingProject.value = project; projectDraft.name = project.name; projectDraft.members = project.members.map(member => ({ ...member })) }
+function addDraftMember() { if (candidate.value && !projectDraft.members.some(member => member.id === candidate.value)) { projectDraft.members.push({ id: candidate.value }); candidate.value = '' } }
 async function saveProject() {
   if (busy.value) return
   busy.value = true; modalError.value = ''
@@ -95,7 +95,7 @@ async function confirmRemove() {
       <section class="panel admin-renovations">
         <div class="panel-heading"><div><h2>Reformas</h2><p class="muted small">{{ store.renovations.length }} reformas cadastradas</p></div><Icon name="house"/></div>
         <div v-if="!store.renovations.length" class="empty">Crie uma reforma pelo menu lateral.</div>
-        <div v-for="project in store.renovations" :key="project.id" class="admin-project-row"><div><strong>{{ project.name }}</strong><span class="muted small block">{{ project.memberIds.length }} membros vinculados</span></div><div class="inline admin-actions"><button class="button secondary" :disabled="busy" @click="editProject(project)"><Icon name="edit" :size="17"/>Editar</button><button class="button secondary danger-text" :disabled="busy" @click="askRemove('project', project)"><Icon name="trash" :size="17"/>Excluir</button></div></div>
+        <div v-for="project in store.renovations" :key="project.id" class="admin-project-row"><div><strong>{{ project.name }}</strong><span class="muted small block">{{ project.members.length }} membros vinculados</span></div><div class="inline admin-actions"><button class="button secondary" :disabled="busy" @click="editProject(project)"><Icon name="edit" :size="17"/>Editar</button><button class="button secondary danger-text" :disabled="busy" @click="askRemove('project', project)"><Icon name="trash" :size="17"/>Excluir</button></div></div>
       </section>
     </div>
 
@@ -120,8 +120,8 @@ async function confirmRemove() {
     <Modal v-if="editingProject" title="Editar reforma" wide :busy="busy" @close="!busy && (editingProject = null)">
       <form class="form-stack" @submit.prevent="saveProject">
         <label>Nome da reforma<input v-model="projectDraft.name" minlength="2" maxlength="80" required :disabled="busy"/></label>
-        <div class="admin-add-member"><SearchSelect v-model="candidate" label="Adicionar membro" placeholder="Buscar pelo nome do membro" :options="availableOptions" :disabled="busy || projectDraft.memberIds.length >= 300"/><button type="button" class="button secondary" :disabled="busy || !candidate" @click="addDraftMember">Adicionar</button></div>
-        <div class="admin-draft-members"><p v-if="!draftMembers.length" class="muted">Nenhum membro vinculado.</p><div v-for="member in draftMembers" :key="member.id" class="admin-project-row"><span>{{ member.name }}</span><button type="button" class="text-button danger-text" :disabled="busy" @click="projectDraft.memberIds = projectDraft.memberIds.filter(uid => uid !== member.id)">Remover vínculo</button></div></div>
+        <div class="admin-add-member"><SearchSelect v-model="candidate" label="Adicionar membro" placeholder="Buscar pelo nome do membro" :options="availableOptions" :disabled="busy || projectDraft.members.length >= 300"/><button type="button" class="button secondary" :disabled="busy || !candidate" @click="addDraftMember">Adicionar</button></div>
+        <div class="admin-draft-members"><p v-if="!draftMembers.length" class="muted">Nenhum membro vinculado.</p><div v-for="member in draftMembers" :key="member.id" class="admin-project-row"><span>{{ member.name }}</span><button type="button" class="text-button danger-text" :disabled="busy" @click="projectDraft.members = projectDraft.members.filter(item => item.id !== member.id)">Remover vínculo</button></div></div>
         <p class="hint">Administradores têm acesso a todas as reformas. Remover um vínculo não exclui a conta nem os gastos registrados.</p>
         <p v-if="modalError" class="form-error" role="alert">{{ modalError }}</p>
         <div class="modal-actions"><button type="button" class="button secondary" :disabled="busy" @click="editingProject = null">Cancelar</button><button class="button" :disabled="busy">{{ busy ? 'Salvando…' : 'Salvar reforma' }}</button></div>

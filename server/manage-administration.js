@@ -1,7 +1,7 @@
 import { requireAdmin } from './create-user.js'
 import { validId, validateMemberEdit, validateRenovationEdit, protectOwnAccount } from '../src/lib/admin-validation.js'
 export function adminError(status, message) { const error = new Error(message); error.status = status; return error }
-const memberRef = (db, uid) => db.doc(`renovations/main/members/${uid}`)
+const memberRef = (db, uid) => db.doc(`users/${uid}`)
 async function actorInTransaction(tx, db, actor) {
   const snapshot = await tx.get(memberRef(db, actor.uid))
   requireAdmin(actor, snapshot.exists ? snapshot.data() : null)
@@ -36,9 +36,12 @@ export async function editAccount({ auth, db, actor, uid, input }) {
     await db.runTransaction(async tx => {
       await actorInTransaction(tx, db, actor)
       const target = await tx.get(ref)
+      const projects = data.name !== previous.data().name ? await tx.get(db.collection('renovations').where('members', 'array-contains', { id: uid, name: previous.data().name })) : { docs: [], size: 0 }
+      if (projects.size > 400) throw adminError(409, 'Há muitas reformas para renomear esta conta. Remova os vínculos em etapas.')
       if (!target.exists || target.data().active !== true) throw adminError(404, 'Conta não encontrada.')
       // Evita sobrescrever edição administrativa concorrente com um estado antigo.
       if (target.data().editingLock !== operationId || target.data().email !== previous.data().email || target.data().role !== previous.data().role || target.data().name !== previous.data().name) throw adminError(409, 'A conta foi alterada por outro administrador. Reabra a edição.')
+      projects.docs.forEach(project => tx.update(project.ref, { members: (project.data().members || []).map(member => member.id === uid ? { id: uid, name: data.name } : member) }))
       tx.update(ref, { ...data, editingLock: null, editingUntil: 0, updatedAt: new Date(), updatedBy: actor.uid })
     })
   } catch (error) {
@@ -71,10 +74,10 @@ export async function deleteAccount({ auth, db, actor, uid }) {
     const target = await tx.get(ref)
     if (!target.exists) throw adminError(404, 'Conta não encontrada.')
     if (target.data().editingLock && target.data().editingUntil > Date.now()) throw adminError(409, 'Esta conta está sendo editada. Aguarde e tente novamente.')
-    const projects = await tx.get(db.collection('renovations').where('memberIds', 'array-contains', uid))
+    const projects = await tx.get(db.collection('renovations').where('members', 'array-contains', { id: uid, name: target.data().name }))
     if (projects.size > 400) throw adminError(409, 'Há muitas reformas para esta operação. Remova os vínculos em etapas.')
     tx.update(ref, { active: false, deleting: true, updatedAt: new Date(), updatedBy: actor.uid })
-    projects.docs.forEach(project => tx.update(project.ref, { memberIds: project.data().memberIds.filter(id => id !== uid), updatedAt: new Date(), updatedBy: actor.uid }))
+    projects.docs.forEach(project => tx.update(project.ref, { members: (project.data().members || []).filter(member => member.id !== uid) }))
   })
   // O vínculo inativo já bloqueia os dados, inclusive para tokens ainda em memória.
   try { await auth.deleteUser(uid) }
@@ -91,9 +94,11 @@ export async function linkMember({ db, actor, uid, renovationId }) {
     await actorInTransaction(tx, db, actor)
     const member = await tx.get(memberRef(db, uid)), project = await tx.get(ref)
     if (!member.exists || member.data().active !== true) throw adminError(404, 'Membro não encontrado.')
-    const data = activeProject(project), ids = data.memberIds || []
+    const data = activeProject(project), ids = (data.members || []).map(member => member.id)
     if (!ids.includes(uid) && ids.length >= 300) throw adminError(400, 'Esta reforma já atingiu o limite de 300 membros.')
-    tx.update(ref, { memberIds: [...new Set([...ids, uid])], updatedAt: new Date(), updatedBy: actor.uid })
+    const named = (data.members || []).filter(item => item.id !== uid)
+    named.push({ id: uid, name: member.data().name })
+    tx.update(ref, { members: named })
   })
   return { linked: true }
 }
@@ -105,9 +110,9 @@ export async function editRenovation({ db, actor, renovationId, input }) {
   await db.runTransaction(async tx => {
     await actorInTransaction(tx, db, actor)
     activeProject(await tx.get(ref))
-    const members = await Promise.all(data.memberIds.map(uid => tx.get(memberRef(db, uid))))
+    const members = await Promise.all(data.members.map(({ id }) => tx.get(memberRef(db, id))))
     if (members.some(snapshot => !snapshot.exists || snapshot.data().active !== true)) throw adminError(400, 'Um membro não está mais disponível. Reabra a edição.')
-    tx.update(ref, { ...data, updatedAt: new Date(), updatedBy: actor.uid })
+    tx.update(ref, { name: data.name, members: members.map((snapshot, index) => ({ id: data.members[index].id, name: snapshot.data().name })) })
   })
   return { updated: true }
 }
@@ -117,7 +122,7 @@ export async function deleteRenovation({ db, actor, renovationId }) {
     await actorInTransaction(tx, db, actor)
     const ref = db.doc(`renovations/${renovationId}`), project = await tx.get(ref)
     if (!project.exists) throw adminError(404, 'Reforma não encontrada.')
-    tx.update(ref, { deleted: true, memberIds: [], deletedAt: new Date(), deletedBy: actor.uid, updatedAt: new Date(), updatedBy: actor.uid })
+    tx.update(ref, { deleted: true, members: [], deletedAt: new Date(), deletedBy: actor.uid })
   })
   return { removed: true }
 }

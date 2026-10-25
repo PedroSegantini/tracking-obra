@@ -4,22 +4,18 @@ const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim()
 if (!email) throw new Error('Preencha BOOTSTRAP_ADMIN_EMAIL em .env.admin.')
 const budgetCents = Number(process.env.INITIAL_BUDGET_CENTS || 0)
 if (!Number.isSafeInteger(budgetCents) || budgetCents < 0 || budgetCents > MAX_CENTS) throw new Error('INITIAL_BUDGET_CENTS inválido.')
-const { auth, db } = adminServices()
-const user = await auth.getUserByEmail(email)
+const { auth, db } = adminServices(), user = await auth.getUserByEmail(email)
+const profile = db.doc(`users/${user.uid}`), newProject = db.collection('renovations').doc()
+const categoryRefs = INITIAL_CATEGORIES.map(() => db.collection('categories').doc())
 await auth.setCustomUserClaims(user.uid, { ...user.customClaims, role: 'admin' })
 await db.runTransaction(async tx => {
-  const renovation = db.doc('renovations/main'), member = db.doc(`renovations/main/members/${user.uid}`)
-  const settings = await tx.get(renovation)
-  const categories = await Promise.all(INITIAL_CATEGORIES.map(c => tx.get(renovation.collection('categories').doc(c.id))))
-  const legacyMembers = settings.exists && !Array.isArray(settings.data().memberIds) ? await tx.get(renovation.collection('members')) : null
-  if (settings.exists) {
-    const patch = {}
-    if (legacyMembers) patch.memberIds = [...new Set([...legacyMembers.docs.filter(member => member.data().active === true).map(member => member.id), user.uid])]
-    if (typeof settings.data().deleted !== 'boolean') patch.deleted = false
-    if (Object.keys(patch).length) tx.update(renovation, patch)
-  }
-  if (!settings.exists) tx.create(renovation, { name: 'Nossa reforma', memberIds: [user.uid], deleted: false, budgetCents, updatedAt: new Date(), updatedBy: user.uid })
-  tx.set(member, { name: process.env.BOOTSTRAP_ADMIN_NAME?.trim() || user.displayName || 'Administrador', email: user.email, role: 'admin', active: true, createdBy: user.uid, createdAt: new Date() }, { merge: true })
-  INITIAL_CATEGORIES.forEach(({ id, ...c }, i) => { if (!categories[i].exists) tx.create(renovation.collection('categories').doc(id), { ...c, createdAt: new Date(), createdBy: user.uid, updatedAt: new Date(), updatedBy: user.uid }) })
+  const previous = await tx.get(profile), projects = await tx.get(db.collection('renovations'))
+  if (projects.docs.some(project => project.data().schemaVersion !== 3)) throw new Error('Execute migrate-schema.mjs antes do bootstrap.')
+  const name = previous.exists ? previous.data().name : process.env.BOOTSTRAP_ADMIN_NAME?.trim() || user.displayName || 'Administrador'
+  tx.set(profile, { id: user.uid, name, email: user.email, role: 'admin', active: true }, { merge: true })
+  // A repeated bootstrap never adds another renovation or resets its budget.
+  if (!projects.empty) return
+  tx.create(newProject, { id: newProject.id, schemaVersion: 3, name: 'Nossa reforma', members: [{ id: user.uid, name }], deleted: false, budgetCents })
+  INITIAL_CATEGORIES.forEach(({ id: unused, ...category }, index) => tx.create(categoryRefs[index], { ...category, ID: categoryRefs[index].id, renovationId: newProject.id }))
 })
-console.log('Administrador e estrutura inicial configurados. Saia e entre no aplicativo para atualizar a sessão.')
+console.log('Administrador configurado. Saia e entre novamente no aplicativo.')

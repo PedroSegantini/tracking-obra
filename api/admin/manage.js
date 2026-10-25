@@ -15,7 +15,7 @@ export function createManagementHandler({ services = adminServices, manage = man
       const { auth, db } = services()
       let actor
       try { actor = await auth.verifyIdToken(bearer, true) } catch { return res.status(401).json({ error: 'Sessão inválida. Entre novamente.' }) }
-      const member = await db.doc(`renovations/main/members/${actor.uid}`).get()
+      const member = await db.doc(`users/${actor.uid}`).get()
       requireAdmin(actor, member.exists ? member.data() : null)
       const result = await manage({ auth, db, actor, body })
       return res.status(200).json(result)

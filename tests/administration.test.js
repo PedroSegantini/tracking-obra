@@ -2,13 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { editAccount, deleteAccount, linkMember, editRenovation, deleteRenovation } from '../server/manage-administration.js'
 import { createManagementHandler } from '../api/admin/manage.js'
-const profile = uid => `renovations/main/members/${uid}`
+const profile = uid => `users/${uid}`
 function fixture() {
   const data = new Map(Object.entries({
     [profile('admin')]: { name: 'Admin', email: 'admin@example.com', role: 'admin', active: true },
     [profile('member')]: { name: 'Pessoa', email: 'pessoa@example.com', role: 'user', active: true },
-    'renovations/main': { name: 'Casa', budgetCents: 90000, memberIds: ['admin', 'member'], deleted: false },
-    'renovations/second': { name: 'Apartamento', budgetCents: 12000, memberIds: ['admin'], deleted: false },
+    'renovations/main': { name: 'Casa', budgetCents: 90000, members: [{ id: 'admin', name: 'Admin' }, { id: 'member', name: 'Pessoa' }], deleted: false },
+    'renovations/second': { name: 'Apartamento', budgetCents: 12000, members: [{ id: 'admin', name: 'Admin' }], deleted: false },
     'renovations/main/expenses/old': { amountCents: 5000, createdBy: 'member' },
   }))
   const clone = value => value === undefined ? undefined : structuredClone(value)
@@ -16,7 +16,7 @@ function fixture() {
   function ref(path) { return { path, get: async () => snapshot(path), update: async patch => data.set(path, { ...data.get(path), ...clone(patch) }) } }
   function query(path, filters = []) {
     return { _query: true, where: (field, operator, value) => query(path, [...filters, { field, operator, value }]), get: async () => {
-      const docs = [...data.keys()].filter(key => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/')).filter(key => filters.every(({ field, operator, value }) => operator === 'array-contains' ? data.get(key)[field]?.includes(value) : data.get(key)[field] === value)).map(snapshot)
+      const docs = [...data.keys()].filter(key => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/')).filter(key => filters.every(({ field, operator, value }) => operator === 'array-contains' ? data.get(key)[field]?.some(item => JSON.stringify(item) === JSON.stringify(value)) : data.get(key)[field] === value)).map(snapshot)
       return { docs, size: docs.length }
     } }
   }
@@ -41,7 +41,7 @@ test('edição atualiza Authentication, cargo e perfil sem guardar senha', async
   const f = fixture()
   const result = await editAccount({ ...f, uid: 'member', input: { name: 'Novo nome', email: 'novo@example.com', role: 'admin', password: 'ignorar' } })
   assert.equal(f.data.get(profile('member')).name, 'Novo nome'); assert.equal(f.data.get(profile('member')).role, 'admin')
-  assert.equal(f.identities.get('member').emailVerified, false); assert.deepEqual(f.identities.get('member').customClaims, { role: 'admin', retained: true })
+  assert.equal(f.data.get('renovations/main').members.find(member => member.id === 'member').name, 'Novo nome'); assert.equal(f.identities.get('member').emailVerified, false); assert.deepEqual(f.identities.get('member').customClaims, { role: 'admin', retained: true })
   assert.equal(f.data.get(profile('member')).password, undefined); assert.equal(f.data.get(profile('member')).editingLock, null)
   assert.equal(result.sessionsRevoked, true); assert.ok(f.events.some(([action]) => action === 'revoke'))
 })
@@ -67,7 +67,7 @@ test('remover conta bloqueia vínculo, remove login e vínculos, preserva gastos
   const f = fixture()
   await deleteAccount({ ...f, uid: 'member' })
   assert.equal(f.identities.has('member'), false); assert.equal(f.data.get(profile('member')).active, false); assert.equal(f.data.get(profile('member')).deleting, false)
-  assert.deepEqual(f.data.get('renovations/main').memberIds, ['admin']); assert.equal(f.data.get('renovations/main/expenses/old').amountCents, 5000)
+  assert.deepEqual(f.data.get('renovations/main').members, [{ id: 'admin', name: 'Admin' }]); assert.equal(f.data.get('renovations/main/expenses/old').amountCents, 5000)
 })
 test('exclusão incompleta bloqueia acesso e pode ser repetida com segurança', async () => {
   const f = fixture(), originalDelete = f.auth.deleteUser
@@ -80,21 +80,21 @@ test('exclusão incompleta bloqueia acesso e pode ser repetida com segurança', 
 test('atrelar membro é idempotente e não aceita conta desativada', async () => {
   const f = fixture()
   await linkMember({ ...f, uid: 'member', renovationId: 'second' }); await linkMember({ ...f, uid: 'member', renovationId: 'second' })
-  assert.deepEqual(f.data.get('renovations/second').memberIds, ['admin', 'member'])
+  assert.deepEqual(f.data.get('renovations/second').members, [{ id: 'admin', name: 'Admin' }, { id: 'member', name: 'Pessoa' }])
   f.data.get(profile('member')).active = false
   await assert.rejects(linkMember({ ...f, uid: 'member', renovationId: 'second' }), /não encontrado/)
 })
 test('editar reforma renomeia e gerencia vínculos sem alterar despesas nem orçamento', async () => {
   const f = fixture()
-  await editRenovation({ ...f, renovationId: 'main', input: { name: 'Casa renovada', memberIds: ['admin'] } })
-  assert.equal(f.data.get('renovations/main').name, 'Casa renovada'); assert.equal(f.data.get('renovations/main').budgetCents, 90000); assert.deepEqual(f.data.get('renovations/main').memberIds, ['admin'])
+  await editRenovation({ ...f, renovationId: 'main', input: { name: 'Casa renovada', members: [{ id: 'admin' }] } })
+  assert.equal(f.data.get('renovations/main').name, 'Casa renovada'); assert.equal(f.data.get('renovations/main').budgetCents, 90000); assert.deepEqual(f.data.get('renovations/main').members, [{ id: 'admin', name: 'Admin' }])
   assert.equal(f.data.get('renovations/main/expenses/old').createdBy, 'member')
-  await assert.rejects(editRenovation({ ...f, renovationId: 'main', input: { name: 'Casa', memberIds: ['inexistente'] } }), /não está mais disponível/)
+  await assert.rejects(editRenovation({ ...f, renovationId: 'main', input: { name: 'Casa', members: [{ id: 'inexistente' }] } }), /não está mais disponível/)
 })
-test('excluir reforma preserva histórico e os perfis que ficam no caminho main', async () => {
+test('excluir reforma preserva histórico e os perfis globais em users', async () => {
   const f = fixture()
   await deleteRenovation({ ...f, renovationId: 'main' })
-  assert.equal(f.data.get('renovations/main').deleted, true); assert.deepEqual(f.data.get('renovations/main').memberIds, [])
+  assert.equal(f.data.get('renovations/main').deleted, true); assert.deepEqual(f.data.get('renovations/main').members, [])
   assert.equal(f.data.get(profile('admin')).active, true); assert.ok(f.data.has('renovations/main/expenses/old'))
   await assert.rejects(linkMember({ ...f, uid: 'member', renovationId: 'main' }), /não encontrada/)
 })

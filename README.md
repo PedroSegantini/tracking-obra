@@ -69,20 +69,44 @@ firestore.rules           Autorização e validação no banco
 tests/                    Verificações automatizadas
 ```
 
-## Atualização das regras
+## Estrutura do Firestore
 
-Se o Firebase já estava configurado, execute `scripts/migrate-memberships.mjs` com suas credenciais administrativas e publique regras e índices antes de usar os vínculos individuais. Os dados da reforma original `main` são preservados. A migração preenche somente campos de vínculo/exclusão ausentes, sem sobrescrever listas existentes:
-
-```sh
-node --env-file=.env.admin scripts/migrate-memberships.mjs
-npx firebase-tools@14.0.0 deploy --only firestore:rules,firestore:indexes --project SEU_PROJECT_ID
+```text
+users/{uid}                         id, name, email, role, active e campos operacionais da conta
+categories/{autoId}                 ID, name, color, active, renovationId
+renovations/{autoId}                id, name, budgetCents, members, deleted, schemaVersion
+  expenses/{expenseId}              despesas, parcelas, categoryId e auditoria
 ```
 
-Aguarde a criação do índice antes de testar contas `user`. Em um projeto novo, o bootstrap já cria os campos necessários.
+Categorias e reformas usam IDs automáticos do Firestore. `categories.ID` e `renovations.id` correspondem ao ID do próprio documento. Categorias não guardam `categoryId` nem auditoria; despesas guardam `categoryId` como referência ao documento da categoria. `users` não guarda `createdAt`/`createdBy`. Reformas não guardam `memberIds`, `updatedAt` ou `updatedBy`.
+
+`members` é o único array de vínculos, contendo objetos `{ id, name }`. A consulta do usuário usa `array-contains` com o objeto completo e as regras conferem o ID e o nome do perfil autorizado. Nomes repetidos não concedem acesso a outro ID. A API de edição de conta atualiza perfil e nomes nas reformas na mesma transação. O site refaz a consulta quando o nome ou cargo muda.
+
+## Migrar o banco existente
+
+Feche as sessões da versão antiga e pare o servidor local durante a mudança. Com `.env.admin` configurado:
+
+```sh
+node --env-file=.env.admin scripts/migrate-schema.mjs
+node --env-file=.env.admin scripts/migrate-schema.mjs --apply
+node --env-file=.env.admin scripts/deploy-rules.mjs --apply
+```
+
+O primeiro comando simula. Com `--apply`, o script guarda backup privado completo e mapa de IDs em `.backups/`, gera os novos documentos, atualiza referências de categorias e caminhos das despesas e remove os antigos na mesma transação. Valores, parcelas e demais campos das despesas são preservados. A transação detecta alterações concorrentes e novos documentos inseridos após o planejamento. O limite é de 450 operações; volumes maiores exigem uma migração em etapas revisada. Repetir o script após concluir não gera outros IDs.
+
+O índice composto em `firestore.indexes.json` usa `deleted` + `members`. A consulta atual também deve ser verificada no banco real antes da mudança. Para publicar índices pela CLI com uma conta autorizada:
+
+```sh
+npx firebase-tools@14.0.0 deploy --only firestore:indexes --project SEU_PROJECT_ID
+```
+
+Publique a nova versão do site, saia e entre novamente. Não use os scripts antigos de migração em um banco v3. `migrate-schema-v2.mjs` foi mantido apenas para instalações anteriores, com perfis/categorias ainda em subcoleções; nesse caso, migre e limpe a v2 antes de executar a v3. Para um banco novo, use `npm run bootstrap`.
+
+O backup contém dados pessoais e deve permanecer fora do Git. As regras anteriores também são copiadas por `deploy-rules.mjs`. O script `migrate-memberships.mjs` encaminha para o migrador atual.
 
 ## Antes do GitHub
 
-O `.gitignore` exclui `.env.local`, `.env.admin`, arquivos de credenciais conhecidos, `node_modules`, build e logs. Nunca coloque a chave privada em arquivos de exemplo, no código ou em variáveis `VITE_`. Revise `git status` antes do primeiro commit. Nenhum repositório remoto foi criado ou publicação realizada nesta entrega.
+O `.gitignore` exclui `.env.local`, `.env.admin`, arquivos de credenciais conhecidos, `node_modules`, build e logs. Nunca coloque a chave privada em arquivos de exemplo, no código ou em variáveis `VITE_`. Revise `git status` antes do primeiro commit. A publicação do site na Vercel depende do ambiente configurado para o repositório.
 
 O `package-lock.json` deve ser versionado. Use `npm ci` para reproduzir a instalação. Os overrides em `package.json` mantêm compatibilidade e corrigem dependências transitivas.
 
@@ -107,4 +131,4 @@ npx firebase-tools@14.0.0 deploy --only firestore:rules,firestore:indexes --proj
 
 As contas podem vincular Google e e-mail/senha em **Minha conta**, mantendo o mesmo UID. O campo de senha do aplicativo não altera a senha do Google. A exclusão de uma reforma é lógica: remove os vínculos e preserva o histórico, sem restauração pela interface.
 
-Firebase e Vercel ainda precisam ser configurados por você; nenhuma publicação é executada pelos comandos de build. Não inclua arquivos de credenciais no Git.
+Cada ambiente precisa das próprias variáveis Firebase e Vercel; o comando de build não publica o site nem altera o banco. Não inclua arquivos de credenciais no Git.

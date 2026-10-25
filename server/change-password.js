@@ -23,7 +23,7 @@ export async function changeAccountPassword({ auth, db, uid, input, apiKey, fetc
   let credentials
   try { credentials = validatePasswordChange(input) } catch (error) { throw fail(400, error.message) }
   if (!apiKey) throw fail(503, 'O serviço de alteração de senha ainda não foi configurado.')
-  const member = await db.doc(`renovations/main/members/${uid}`).get()
+  const member = await db.doc(`users/${uid}`).get()
   if (!member.exists || member.data().active !== true) throw fail(403, 'Sua conta não está autorizada.')
   const user = await auth.getUser(uid)
   if (user.disabled || !user.email) throw fail(403, 'Sua conta não está autorizada.')

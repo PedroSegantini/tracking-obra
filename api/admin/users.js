@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const { auth, db } = adminServices()
     let token
     try { token = await auth.verifyIdToken(bearer, true) } catch { return res.status(401).json({ error: 'Sessão inválida ou expirada. Entre novamente.' }) }
-    const member = await db.doc(`renovations/main/members/${token.uid}`).get()
+    const member = await db.doc(`users/${token.uid}`).get()
     requireAdmin(token, member.exists ? member.data() : null)
     let body
     try {

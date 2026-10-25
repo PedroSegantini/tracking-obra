@@ -18,7 +18,7 @@ test('cria conta e membro sem persistir senha no Firestore', async () => {
   const auth = { createUser: async () => ({ uid: 'novo' }), setCustomUserClaims: async (uid, value) => { claims = value }, deleteUser: async () => {} }
   const db = { doc: () => ({ create: async value => { stored = value } }) }
   const result = await provisionUser({ auth, db, actorUid: 'admin', input })
-  assert.equal(stored.createdBy, 'admin'); assert.equal(stored.role, 'user'); assert.equal(stored.password, undefined); assert.equal(result.password, undefined); assert.deepEqual(claims, { role: 'user' })
+  assert.equal(stored.createdBy, undefined); assert.equal(stored.createdAt, undefined); assert.equal(stored.id, 'novo'); assert.equal(stored.role, 'user'); assert.equal(stored.password, undefined); assert.equal(result.password, undefined); assert.deepEqual(claims, { role: 'user' })
 })
 test('desfaz conta criada se o vínculo falhar', async () => {
   let deleted

@@ -1,13 +1,15 @@
 import { reactive } from 'vue'
 import { onAuthStateChanged, signInWithEmailAndPassword, signInWithPopup, signOut, GoogleAuthProvider, sendPasswordResetEmail, linkWithPopup, linkWithCredential, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth'
-import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, runTransaction, query, where } from 'firebase/firestore'
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, query, where } from 'firebase/firestore'
 import { auth, db, isDemo, configError } from './lib/firebase'
-import { INITIAL_CATEGORIES, today, validateExpense, categoryId, normalizeName, MAX_CENTS, validateRenovationName } from './lib/domain'
+import { INITIAL_CATEGORIES, today, validateExpense, normalizeName, MAX_CENTS, validateRenovationName } from './lib/domain'
 import { errorMessage } from './lib/errors'
 import { validId, validateMemberEdit, validateRenovationEdit, protectOwnAccount } from './lib/admin-validation'
 
 export const store = reactive({ ready: false, user: null, member: null, budgetCents: 0, renovationName: 'Nossa reforma', selectedRenovationId: 'main', renovations: [], categories: [], expenses: [], members: [], loadingData: true, syncError: '', demo: isDemo, configError, toasts: [], expenseModal: false, editing: null })
 let stops = [], dataStops = [], generation = 0, dataGeneration = 0, demoProjects = {}
+const demoId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 20)
+const freshCategories = () => INITIAL_CATEGORIES.map(({ id, ...data }) => ({ ...data, id: demoId() }))
 const DEMO_KEY = 'tracking-obra-demo-v1'
 export function notify(message, type = 'success') {
   const id = crypto.randomUUID()
@@ -31,7 +33,8 @@ function saveDemo() {
   persistDemo()
 }
 function syncDemoRenovations() {
-  store.renovations = Object.values(demoProjects).filter(project => !project.deleted && (store.member?.role === 'admin' || project.memberIds.includes(store.user.uid))).map(({ id, name, memberIds }) => ({ id, name, memberIds: [...memberIds] }))
+  Object.values(demoProjects).forEach(project => { if (project.memberIds) { project.members = namedMembers(project.memberIds); delete project.memberIds } })
+  store.renovations = Object.values(demoProjects).filter(project => !project.deleted && (store.member?.role === 'admin' || project.members.some(member => member.id === store.user.uid))).map(({ id, name, members }) => ({ id, name, members: members.map(member => ({ id: member.id, name: store.members.find(user => user.id === member.id)?.name || member.name })) }))
   if (store.selectedRenovationId && !store.renovations.some(project => project.id === store.selectedRenovationId)) {
     const next = store.renovations[0]
     if (next) selectRenovation(next.id)
@@ -57,7 +60,8 @@ function loadDemo() {
   store.members = saved?.members ?? [{ id: 'demo-admin', name: 'Família', email: 'familia@exemplo.com', role: 'admin', active: true }]
   const legacyIds = store.members.filter(member => member.active !== false).map(member => member.id)
   Object.values(demoProjects).forEach(project => {
-    if (!Array.isArray(project.memberIds)) project.memberIds = [...legacyIds]
+    if (!Array.isArray(project.members)) project.members = namedMembers(project.memberIds || legacyIds)
+    delete project.memberIds
     project.deleted ??= false
   })
   store.selectedRenovationId = ''
@@ -80,7 +84,9 @@ function clearData() {
   store.selectedRenovationId = ''; store.renovationName = 'Nossa reforma'; demoProjects = {}
 }
 const base = () => doc(db, 'renovations', store.selectedRenovationId)
-const membersBase = () => collection(db, 'renovations', 'main', 'members')
+const categoryRef = id => doc(db, 'categories', id)
+const namedMembers = ids => ids.map(id => ({ id, name: store.members.find(user => user.id === id)?.name || (id === store.user?.uid ? store.member?.name : '') || 'Membro indisponível' }))
+const membersBase = () => collection(db, 'users')
 function listenData() {
   const turn = dataGeneration, reference = base()
   const loaded = new Set()
@@ -91,13 +97,13 @@ function listenData() {
     }, error => { if (turn === dataGeneration) { store.syncError = errorMessage(error); store.loadingData = false } }))
   }
   listen('settings', reference, snap => { store.budgetCents = snap.data()?.budgetCents ?? 0; store.renovationName = snap.data()?.name || 'Reforma' })
-  listen('categories', collection(reference, 'categories'), snap => { store.categories = snap.docs.map(d => ({ ...d.data(), id: d.id })) })
+  listen('categories', query(collection(db, 'categories'), where('renovationId', '==', store.selectedRenovationId)), snap => { store.categories = snap.docs.map(d => ({ ...d.data(), id: d.id })) })
   listen('expenses', collection(reference, 'expenses'), snap => { store.expenses = snap.docs.map(d => ({ ...d.data(), id: d.id })) })
 }
 export function selectRenovation(id) {
   if (!store.member) throw new Error('Entre com uma conta autorizada.')
   const project = store.renovations.find(item => item.id === id)
-  if (!project || (store.member.role !== 'admin' && !project.memberIds?.includes(store.user.uid))) throw new Error('Você não tem acesso a esta reforma.')
+  if (!project || (store.member.role !== 'admin' && !project.members?.some(member => member.id === store.user.uid))) throw new Error('Você não tem acesso a esta reforma.')
   if (id === store.selectedRenovationId && !store.loadingData) return
   if (isDemo) captureDemoProject()
   clearProjectData()
@@ -112,19 +118,19 @@ export async function createRenovation(name) {
   if (store.member?.role !== 'admin') throw new Error('Somente administradores podem criar reformas.')
   name = validateRenovationName(name)
   const uid = store.user.uid
-  const id = isDemo ? crypto.randomUUID() : doc(collection(db, 'renovations')).id
+  const id = isDemo ? demoId() : doc(collection(db, 'renovations')).id
   if (isDemo) {
     captureDemoProject()
-    demoProjects[id] = { id, name, memberIds: [uid], deleted: false, budgetCents: 0, categories: INITIAL_CATEGORIES.map(c => ({ ...c })), expenses: [] }
+    demoProjects[id] = { id, name, members: [{ id: uid, name: store.member.name }], deleted: false, budgetCents: 0, categories: freshCategories(), expenses: [] }
     persistDemo()
   } else {
     const ref = doc(db, 'renovations', id), batch = writeBatch(db)
-    batch.set(ref, { name, memberIds: [uid], deleted: false, budgetCents: 0, updatedAt: serverTimestamp(), updatedBy: uid })
-    INITIAL_CATEGORIES.forEach(({ id: category, ...data }) => batch.set(doc(ref, 'categories', category), { ...data, createdBy: uid, createdAt: serverTimestamp(), updatedBy: uid, updatedAt: serverTimestamp() }))
+    batch.set(ref, { id, schemaVersion: 3, name, members: [{ id: uid, name: store.member.name }], deleted: false, budgetCents: 0 })
+    INITIAL_CATEGORIES.forEach(({ id: unused, ...data }) => { const category = doc(collection(db, 'categories')); batch.set(category, { ...data, ID: category.id, renovationId: id }) })
     await batch.commit()
   }
   if (store.user?.uid !== uid || !store.member) return
-  if (!store.renovations.some(project => project.id === id)) store.renovations.push({ id, name, memberIds: [uid] })
+  if (!store.renovations.some(project => project.id === id)) store.renovations.push({ id, name, members: [{ id: uid, name: store.member.name }] })
   selectRenovation(id)
 }
 export function initSession() {
@@ -133,7 +139,7 @@ export function initSession() {
     generation++; const turn = generation
     clearData(); store.user = user
     if (!user) { store.ready = true; return }
-    let projectStop, listRole
+    let projectStop, listIdentity
     stops.push(() => projectStop?.())
     stops.push(onSnapshot(doc(membersBase(), user.uid), async snap => {
       if (turn !== generation) return
@@ -141,16 +147,17 @@ export function initSession() {
       store.member = member?.active === true && ['admin', 'user'].includes(member.role) ? member : null
       store.ready = true
       if (!store.member) { generation++; clearData(); store.ready = true; return }
-      if (listRole === member.role) return
-      listRole = member.role
+      const identity = JSON.stringify([member.role, member.name])
+      if (listIdentity === identity) return
+      listIdentity = identity
       projectStop?.(); clearProjectData(); store.selectedRenovationId = ''
       try { await user.getIdToken(true) }
       catch { if (turn === generation) { store.syncError = 'Entre novamente para atualizar suas permissões.'; store.loadingData = false } return }
-      if (turn !== generation || store.member?.role !== member.role) return
-      const projectsQuery = member.role === 'admin' ? collection(db, 'renovations') : query(collection(db, 'renovations'), where('deleted', '==', false), where('memberIds', 'array-contains', user.uid))
+      if (turn !== generation || JSON.stringify([store.member?.role, store.member?.name]) !== identity) return
+      const projectsQuery = member.role === 'admin' ? collection(db, 'renovations') : query(collection(db, 'renovations'), where('deleted', '==', false), where('members', 'array-contains', { id: user.uid, name: member.name }))
       projectStop = onSnapshot(projectsQuery, projects => {
         if (turn !== generation) return
-        store.renovations = projects.docs.filter(d => d.data().deleted !== true).map(d => ({ id: d.id, name: d.data().name || 'Reforma', memberIds: d.data().memberIds || [] })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+        store.renovations = projects.docs.filter(d => d.data().deleted !== true).map(d => ({ id: d.id, name: d.data().name || 'Reforma', members: d.data().members || [] })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
         if (!store.renovations.some(project => project.id === store.selectedRenovationId)) {
           const preferred = preferredRenovation()
           const id = store.renovations.find(project => project.id === preferred)?.id || store.renovations[0]?.id
@@ -237,26 +244,23 @@ export async function removeExpense(id) {
 export async function saveBudget(budgetCents) {
   if (!Number.isSafeInteger(budgetCents) || budgetCents < 0 || budgetCents > MAX_CENTS) throw new Error('Orçamento inválido.')
   if (isDemo) { store.budgetCents = budgetCents; saveDemo() }
-  else await updateDoc(base(), { budgetCents, updatedBy: store.user.uid, updatedAt: serverTimestamp() })
+  else await updateDoc(base(), { budgetCents })
 }
 export async function addCategory(name, color) {
-  name = name.trim(); const id = categoryId(name)
-  if (name.length < 2 || name.length > 60 || !id) throw new Error('Use um nome de 2 a 60 caracteres com letras ou números.')
+  name = name.trim()
+  if (name.length < 2 || name.length > 60) throw new Error('Use um nome de 2 a 60 caracteres.')
   if (!/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Cor inválida.')
-  if (store.categories.some(c => c.id === id || normalizeName(c.name) === normalizeName(name))) throw new Error('Já existe uma categoria com esse nome, inclusive entre as desativadas.')
+  if (store.categories.some(category => normalizeName(category.name) === normalizeName(name))) throw new Error('Já existe uma categoria com esse nome, inclusive entre as desativadas.')
   const data = { name, color, active: true }
-  if (isDemo) { store.categories.push({ id, ...data }); saveDemo() }
+  if (isDemo) { store.categories.push({ ...data, id: demoId() }); saveDemo() }
   else {
-    const ref = doc(base(), 'categories', id)
-    await runTransaction(db, async tx => {
-      if ((await tx.get(ref)).exists()) throw new Error('Esta categoria já existe.')
-      tx.set(ref, { ...data, createdBy: store.user.uid, createdAt: serverTimestamp(), updatedBy: store.user.uid, updatedAt: serverTimestamp() })
-    })
+    const ref = doc(collection(db, 'categories'))
+    await setDoc(ref, { ...data, ID: ref.id, renovationId: store.selectedRenovationId })
   }
 }
 export async function toggleCategory(category) {
   if (isDemo) { store.categories.find(c => c.id === category.id).active = !category.active; saveDemo() }
-  else await updateDoc(doc(base(), 'categories', category.id), { active: !category.active, updatedBy: store.user.uid, updatedAt: serverTimestamp() })
+  else await updateDoc(categoryRef(category.id), { active: !category.active })
 }
 export async function importExpenses(rows) {
   if (!rows.length || rows.length > 400) throw new Error('Importe entre 1 e 400 despesas por arquivo.')
@@ -304,6 +308,7 @@ export async function updateMember(uid, input) {
   if (!member) throw new Error('Conta não encontrada.')
   if (store.members.some(member => member.id !== uid && member.active !== false && member.email.toLowerCase() === data.email)) throw new Error('Este e-mail já pertence a outra conta.')
   Object.assign(member, data)
+  Object.values(demoProjects).forEach(project => { project.members = project.members.map(item => item.id === uid ? { id: uid, name: data.name } : item) })
   if (uid === store.user.uid) { Object.assign(store.member, data); store.user.email = data.email; store.user.displayName = data.name }
   saveDemo()
   return { updated: true }
@@ -315,7 +320,7 @@ export async function removeMember(uid) {
   if (!member) throw new Error('Conta não encontrada.')
   captureDemoProject()
   member.active = false; member.deleted = true
-  Object.values(demoProjects).forEach(project => { project.memberIds = project.memberIds.filter(id => id !== uid) })
+  Object.values(demoProjects).forEach(project => { project.members = project.members.filter(member => member.id !== uid) })
   syncDemoRenovations(); persistDemo()
   return { removed: true }
 }
@@ -325,9 +330,9 @@ export async function linkMemberToRenovation(uid, renovationId) {
   if (!store.members.some(member => member.id === uid && member.active !== false)) throw new Error('Membro não encontrado.')
   const project = demoProjects[renovationId]
   if (!project || project.deleted) throw new Error('Reforma não encontrada.')
-  if (!project.memberIds.includes(uid) && project.memberIds.length >= 300) throw new Error('Selecione até 300 membros.')
+  if (!project.members.some(member => member.id === uid) && project.members.length >= 300) throw new Error('Selecione até 300 membros.')
   captureDemoProject()
-  demoProjects[renovationId].memberIds = [...new Set([...demoProjects[renovationId].memberIds, uid])]
+  demoProjects[renovationId].members = [...project.members.filter(member => member.id !== uid), ...namedMembers([uid])]
   syncDemoRenovations(); persistDemo()
   return { linked: true }
 }
@@ -337,8 +342,8 @@ export async function updateRenovation(renovationId, input) {
   if (!isDemo) return adminCall({ action: 'edit-renovation', renovationId, ...data })
   const project = demoProjects[renovationId]
   if (!project || project.deleted) throw new Error('Reforma não encontrada.')
-  if (data.memberIds.some(uid => !store.members.some(member => member.id === uid && member.active !== false))) throw new Error('Membro não encontrado.')
-  captureDemoProject(); Object.assign(demoProjects[renovationId], data)
+  if (data.members.some(({ id }) => !store.members.some(member => member.id === id && member.active !== false))) throw new Error('Membro não encontrado.')
+  captureDemoProject(); Object.assign(demoProjects[renovationId], { ...data, members: namedMembers(data.members.map(member => member.id)) })
   if (store.selectedRenovationId === renovationId) store.renovationName = data.name
   syncDemoRenovations(); persistDemo()
   return { updated: true }
@@ -347,7 +352,7 @@ export async function removeRenovation(renovationId) {
   requireUIAdmin(); validId(renovationId)
   if (!isDemo) return adminCall({ action: 'delete-renovation', renovationId })
   if (!demoProjects[renovationId] || demoProjects[renovationId].deleted) throw new Error('Reforma não encontrada.')
-  captureDemoProject(); demoProjects[renovationId].deleted = true; demoProjects[renovationId].memberIds = []
+  captureDemoProject(); demoProjects[renovationId].deleted = true; demoProjects[renovationId].members = []
   syncDemoRenovations(); persistDemo()
   return { removed: true }
 }

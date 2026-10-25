@@ -9,7 +9,7 @@ export async function provisionUser({ auth, db, actorUid, input }) {
   const record = await auth.createUser({ email: data.email, password: data.password, displayName: data.name, emailVerified: false, disabled: false })
   try {
     await auth.setCustomUserClaims(record.uid, { role: data.role })
-    await db.doc(`renovations/main/members/${record.uid}`).create({ name: data.name, email: data.email, role: data.role, active: true, createdBy: actorUid, createdAt: new Date() })
+    await db.doc(`users/${record.uid}`).create({ id: record.uid, name: data.name, email: data.email, role: data.role, active: true })
   } catch (error) {
     // Sem vínculo e cargo completos, não deixar uma conta parcialmente provisionada.
     try { await auth.deleteUser(record.uid) } catch { console.error('Falha ao desfazer provisionamento. Revisar UID:', record.uid) }

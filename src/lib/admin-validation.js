@@ -12,8 +12,9 @@ export function validateMemberEdit(input) {
 }
 export function validateRenovationEdit(input) {
   const name = validateRenovationName(input?.name)
-  if (!Array.isArray(input?.memberIds) || input.memberIds.length > 300) throw new Error('Selecione até 300 membros.')
-  return { name, memberIds: [...new Set(input.memberIds.map(validId))] }
+  if (!Array.isArray(input?.members) || input.members.length > 300) throw new Error('Selecione até 300 membros.')
+  const ids = [...new Set(input.members.map(member => validId(member?.id)))]
+  return { name, members: ids.map(id => ({ id })) }
 }
 export function protectOwnAccount(actorUid, targetUid, action, role) {
   if (actorUid === targetUid && (action === 'delete' || role !== 'admin')) throw new Error('Você não pode remover a própria conta nem retirar seu próprio cargo de administrador.')
