@@ -15,7 +15,9 @@ export function parseMoney(value) {
   if (!Number.isSafeInteger(cents) || cents > MAX_CENTS) throw new Error('Valor acima do limite permitido.')
   return cents
 }
-export const inputMoney = (cents = 0) => (cents / 100).toFixed(2).replace('.', ',')
+export const inputMoney = (cents = 0, grouped = false) => grouped
+  ? new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100)
+  : (cents / 100).toFixed(2).replace('.', ',')
 export const today = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

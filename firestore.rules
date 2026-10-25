@@ -5,6 +5,14 @@ service cloud.firestore {
     function memberPath() { return /databases/$(database)/documents/renovations/main/members/$(request.auth.uid); }
     function isMember() { return signedIn() && exists(memberPath()) && get(memberPath()).data.active == true; }
     function isAdmin() { return isMember() && get(memberPath()).data.role == 'admin' && request.auth.token.role == 'admin'; }
+    function canAccess(renovationId) {
+      let project = get(/databases/$(database)/documents/renovations/$(renovationId)).data;
+      return isMember() && project.get('deleted', false) == false && (isAdmin() || request.auth.uid in project.get('memberIds', []));
+    }
+    function canCreateCategory(renovationId) {
+      let path = /databases/$(database)/documents/renovations/$(renovationId);
+      return (exists(path) && canAccess(renovationId)) || (!exists(path) && isAdmin() && existsAfter(path) && getAfter(path).data.deleted == false);
+    }
     function auditCreate(d) {
       return d.createdBy == request.auth.uid && d.createdAt == request.time && d.updatedBy == request.auth.uid && d.updatedAt == request.time;
     }
@@ -31,15 +39,17 @@ service cloud.firestore {
         && d.description is string && d.description.size() <= 500;
     }
     match /renovations/{renovationId} {
-      allow read: if isMember();
+      allow get: if isMember() && (isAdmin() || (resource.data.deleted == false && request.auth.uid in resource.data.memberIds));
+      allow list: if isMember() && (isAdmin() || (resource.data.deleted == false && request.auth.uid in resource.data.memberIds));
       allow create: if isAdmin()
-        && request.resource.data.keys().hasAll(['name', 'budgetCents', 'updatedAt', 'updatedBy'])
-        && request.resource.data.keys().hasOnly(['name', 'budgetCents', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['name', 'budgetCents', 'updatedAt', 'updatedBy', 'memberIds', 'deleted'])
+        && request.resource.data.keys().hasOnly(['name', 'budgetCents', 'updatedAt', 'updatedBy', 'memberIds', 'deleted'])
         && request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 80
         && request.resource.data.budgetCents is int && request.resource.data.budgetCents == 0
+        && request.resource.data.deleted == false && request.resource.data.memberIds == [request.auth.uid]
         && request.resource.data.updatedAt == request.time && request.resource.data.updatedBy == request.auth.uid;
       allow delete: if false;
-      allow update: if isMember()
+      allow update: if canAccess(renovationId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['budgetCents', 'updatedAt', 'updatedBy'])
         && request.resource.data.budgetCents is int && request.resource.data.budgetCents >= 0 && request.resource.data.budgetCents <= 100000000000
         && request.resource.data.updatedAt == request.time && request.resource.data.updatedBy == request.auth.uid;
@@ -49,18 +59,18 @@ service cloud.firestore {
         allow write: if false;
       }
       match /categories/{id} {
-        allow read: if isMember();
-        allow create: if isMember() && existsAfter(/databases/$(database)/documents/renovations/$(renovationId)) && id.matches('^[a-z0-9-]{1,60}$') && validCategory(request.resource.data) && request.resource.data.active == true && auditCreate(request.resource.data);
-        allow update: if isMember() && validCategory(request.resource.data) && auditUpdate(request.resource.data)
+        allow read: if canAccess(renovationId);
+        allow create: if canCreateCategory(renovationId) && id.matches('^[a-z0-9-]{1,60}$') && validCategory(request.resource.data) && request.resource.data.active == true && auditCreate(request.resource.data);
+        allow update: if canAccess(renovationId) && validCategory(request.resource.data) && auditUpdate(request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt', 'updatedBy']);
         allow delete: if false;
       }
       match /expenses/{id} {
-        allow read: if isMember();
-        allow create: if isMember() && validExpense(renovationId, request.resource.data) && activeCategory(renovationId, request.resource.data) && auditCreate(request.resource.data);
-        allow update: if isMember() && validExpense(renovationId, request.resource.data) && auditUpdate(request.resource.data)
+        allow read: if canAccess(renovationId);
+        allow create: if canAccess(renovationId) && validExpense(renovationId, request.resource.data) && activeCategory(renovationId, request.resource.data) && auditCreate(request.resource.data);
+        allow update: if canAccess(renovationId) && validExpense(renovationId, request.resource.data) && auditUpdate(request.resource.data)
           && (request.resource.data.categoryId == resource.data.categoryId || activeCategory(renovationId, request.resource.data));
-        allow delete: if isMember();
+        allow delete: if canAccess(renovationId);
       }
     }
     match /{document=**} { allow read, write: if false; }

@@ -1,7 +1,7 @@
 import { validateUserInput } from '../src/lib/domain.js'
 export function requireAdmin(token, member) {
   if (!token?.uid || token.role !== 'admin' || !member || member.active !== true || member.role !== 'admin') {
-    const error = new Error('Apenas administradores ativos podem criar usuários.'); error.status = 403; throw error
+    const error = new Error('Apenas administradores ativos podem gerenciar contas e reformas.'); error.status = 403; throw error
   }
 }
 export async function provisionUser({ auth, db, actorUid, input }) {

@@ -1,9 +1,10 @@
 import { reactive } from 'vue'
 import { onAuthStateChanged, signInWithEmailAndPassword, signInWithPopup, signOut, GoogleAuthProvider, sendPasswordResetEmail, linkWithPopup, linkWithCredential, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth'
-import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, runTransaction, query, where } from 'firebase/firestore'
 import { auth, db, isDemo, configError } from './lib/firebase'
 import { INITIAL_CATEGORIES, today, validateExpense, categoryId, normalizeName, MAX_CENTS, validateRenovationName } from './lib/domain'
 import { errorMessage } from './lib/errors'
+import { validId, validateMemberEdit, validateRenovationEdit, protectOwnAccount } from './lib/admin-validation'
 
 export const store = reactive({ ready: false, user: null, member: null, budgetCents: 0, renovationName: 'Nossa reforma', selectedRenovationId: 'main', renovations: [], categories: [], expenses: [], members: [], loadingData: true, syncError: '', demo: isDemo, configError, toasts: [], expenseModal: false, editing: null })
 let stops = [], dataStops = [], generation = 0, dataGeneration = 0, demoProjects = {}
@@ -18,7 +19,7 @@ export async function attempt(action) {
 }
 function captureDemoProject() {
   if (!store.selectedRenovationId || !demoProjects[store.selectedRenovationId]) return
-  demoProjects[store.selectedRenovationId] = { id: store.selectedRenovationId, name: store.renovationName, budgetCents: store.budgetCents, categories: JSON.parse(JSON.stringify(store.categories)), expenses: JSON.parse(JSON.stringify(store.expenses)) }
+  demoProjects[store.selectedRenovationId] = { ...demoProjects[store.selectedRenovationId], id: store.selectedRenovationId, name: store.renovationName, budgetCents: store.budgetCents, categories: JSON.parse(JSON.stringify(store.categories)), expenses: JSON.parse(JSON.stringify(store.expenses)) }
 }
 function persistDemo() {
   try { localStorage.setItem(DEMO_KEY, JSON.stringify({ projects: demoProjects, members: store.members })) }
@@ -26,8 +27,16 @@ function persistDemo() {
 }
 function saveDemo() {
   captureDemoProject()
-  store.renovations = Object.values(demoProjects).map(({ id, name }) => ({ id, name }))
+  syncDemoRenovations()
   persistDemo()
+}
+function syncDemoRenovations() {
+  store.renovations = Object.values(demoProjects).filter(project => !project.deleted && (store.member?.role === 'admin' || project.memberIds.includes(store.user.uid))).map(({ id, name, memberIds }) => ({ id, name, memberIds: [...memberIds] }))
+  if (store.selectedRenovationId && !store.renovations.some(project => project.id === store.selectedRenovationId)) {
+    const next = store.renovations[0]
+    if (next) selectRenovation(next.id)
+    else { clearProjectData(); store.selectedRenovationId = ''; store.renovationName = 'Reformas'; store.loadingData = false }
+  }
 }
 function preferenceKey() { return `obra-renovation-${store.user?.uid || 'demo-admin'}` }
 function preferredRenovation() { try { return localStorage.getItem(preferenceKey()) || 'main' } catch { return 'main' } }
@@ -46,10 +55,17 @@ function loadDemo() {
       ] },
   }
   store.members = saved?.members ?? [{ id: 'demo-admin', name: 'Família', email: 'familia@exemplo.com', role: 'admin', active: true }]
-  store.renovations = Object.values(demoProjects).map(({ id, name }) => ({ id, name }))
+  const legacyIds = store.members.filter(member => member.active !== false).map(member => member.id)
+  Object.values(demoProjects).forEach(project => {
+    if (!Array.isArray(project.memberIds)) project.memberIds = [...legacyIds]
+    project.deleted ??= false
+  })
   store.selectedRenovationId = ''
+  syncDemoRenovations()
   const preferred = preferredRenovation()
-  selectRenovation(demoProjects[preferred] ? preferred : store.renovations[0].id)
+  const id = store.renovations.find(project => project.id === preferred)?.id || store.renovations[0]?.id
+  if (id) selectRenovation(id)
+  else { store.loadingData = false; store.renovationName = 'Reformas' }
 }
 function clearProjectData() {
   dataGeneration++
@@ -81,7 +97,7 @@ function listenData() {
 export function selectRenovation(id) {
   if (!store.member) throw new Error('Entre com uma conta autorizada.')
   const project = store.renovations.find(item => item.id === id)
-  if (!project) throw new Error('Reforma não encontrada.')
+  if (!project || (store.member.role !== 'admin' && !project.memberIds?.includes(store.user.uid))) throw new Error('Você não tem acesso a esta reforma.')
   if (id === store.selectedRenovationId && !store.loadingData) return
   if (isDemo) captureDemoProject()
   clearProjectData()
@@ -99,16 +115,16 @@ export async function createRenovation(name) {
   const id = isDemo ? crypto.randomUUID() : doc(collection(db, 'renovations')).id
   if (isDemo) {
     captureDemoProject()
-    demoProjects[id] = { id, name, budgetCents: 0, categories: INITIAL_CATEGORIES.map(c => ({ ...c })), expenses: [] }
+    demoProjects[id] = { id, name, memberIds: [uid], deleted: false, budgetCents: 0, categories: INITIAL_CATEGORIES.map(c => ({ ...c })), expenses: [] }
     persistDemo()
   } else {
     const ref = doc(db, 'renovations', id), batch = writeBatch(db)
-    batch.set(ref, { name, budgetCents: 0, updatedAt: serverTimestamp(), updatedBy: uid })
+    batch.set(ref, { name, memberIds: [uid], deleted: false, budgetCents: 0, updatedAt: serverTimestamp(), updatedBy: uid })
     INITIAL_CATEGORIES.forEach(({ id: category, ...data }) => batch.set(doc(ref, 'categories', category), { ...data, createdBy: uid, createdAt: serverTimestamp(), updatedBy: uid, updatedAt: serverTimestamp() }))
     await batch.commit()
   }
   if (store.user?.uid !== uid || !store.member) return
-  if (!store.renovations.some(project => project.id === id)) store.renovations.push({ id, name })
+  if (!store.renovations.some(project => project.id === id)) store.renovations.push({ id, name, memberIds: [uid] })
   selectRenovation(id)
 }
 export function initSession() {
@@ -117,27 +133,32 @@ export function initSession() {
     generation++; const turn = generation
     clearData(); store.user = user
     if (!user) { store.ready = true; return }
-    let dataStarted = false
-    stops.push(onSnapshot(doc(membersBase(), user.uid), snap => {
+    let projectStop, listRole
+    stops.push(() => projectStop?.())
+    stops.push(onSnapshot(doc(membersBase(), user.uid), async snap => {
       if (turn !== generation) return
       const member = snap.exists() ? { ...snap.data(), id: snap.id } : null
       store.member = member?.active === true && ['admin', 'user'].includes(member.role) ? member : null
       store.ready = true
-      if (store.member && !dataStarted) {
-        dataStarted = true
-        stops.push(onSnapshot(collection(db, 'renovations'), projects => {
-          if (turn !== generation) return
-          store.renovations = projects.docs.map(d => ({ id: d.id, name: d.data().name || 'Reforma' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-          if (!store.renovations.some(p => p.id === store.selectedRenovationId)) {
-            const preferred = preferredRenovation()
-            const id = store.renovations.find(p => p.id === preferred)?.id || store.renovations[0]?.id
-            if (id) selectRenovation(id)
-            else { clearProjectData(); store.syncError = 'Nenhuma reforma disponível. Execute o bootstrap do projeto.'; store.loadingData = false }
-          }
-        }, error => { if (turn === generation) { store.syncError = errorMessage(error); store.loadingData = false } }))
-      }
-      if (!store.member && dataStarted) { generation++; clearData(); store.ready = true }
-    }, error => { store.syncError = errorMessage(error); store.ready = true; store.member = null }))
+      if (!store.member) { generation++; clearData(); store.ready = true; return }
+      if (listRole === member.role) return
+      listRole = member.role
+      projectStop?.(); clearProjectData(); store.selectedRenovationId = ''
+      try { await user.getIdToken(true) }
+      catch { if (turn === generation) { store.syncError = 'Entre novamente para atualizar suas permissões.'; store.loadingData = false } return }
+      if (turn !== generation || store.member?.role !== member.role) return
+      const projectsQuery = member.role === 'admin' ? collection(db, 'renovations') : query(collection(db, 'renovations'), where('deleted', '==', false), where('memberIds', 'array-contains', user.uid))
+      projectStop = onSnapshot(projectsQuery, projects => {
+        if (turn !== generation) return
+        store.renovations = projects.docs.filter(d => d.data().deleted !== true).map(d => ({ id: d.id, name: d.data().name || 'Reforma', memberIds: d.data().memberIds || [] })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+        if (!store.renovations.some(project => project.id === store.selectedRenovationId)) {
+          const preferred = preferredRenovation()
+          const id = store.renovations.find(project => project.id === preferred)?.id || store.renovations[0]?.id
+          if (id) selectRenovation(id)
+          else { clearProjectData(); store.selectedRenovationId = ''; store.renovationName = 'Reformas'; store.loadingData = false }
+        }
+      }, error => { if (turn === generation) { store.syncError = errorMessage(error); store.loadingData = false } })
+    }, error => { if (turn === generation) { store.syncError = errorMessage(error); store.ready = true; store.member = null } }))
   })
 }
 export async function login(email, password) {
@@ -150,7 +171,10 @@ export async function loginGoogle() {
 }
 export function loginDemo() {
   store.user = { uid: 'demo-admin', email: 'familia@exemplo.com', displayName: 'Família' }
-  store.member = { name: 'Família', role: 'admin', active: true }; loadDemo(); store.ready = true
+  store.member = { name: 'Família', role: 'admin', active: true }; loadDemo()
+  const current = store.members.find(member => member.id === 'demo-admin')
+  if (current) { Object.assign(store.member, current); store.user.email = current.email; store.user.displayName = current.name }
+  store.ready = true
 }
 export async function logout() {
   if (!isDemo) await signOut(auth)
@@ -163,7 +187,7 @@ export async function resetPassword(email) {
 export async function connectGoogle() {
   if (isDemo) throw new Error('Vinculação disponível após conectar o Firebase.')
   const result = await linkWithPopup(auth.currentUser, new GoogleAuthProvider())
-  store.user = result.user; notify('Conta Google vinculada. Você pode usar os dois métodos de entrada.')
+  store.user = { uid: result.user.uid, email: result.user.email, displayName: result.user.displayName, providerData: result.user.providerData.map(provider => ({ ...provider })) }; notify('Conta Google vinculada. Você pode usar os dois métodos de entrada.')
 }
 export async function connectPassword(password) {
   if (isDemo) throw new Error('Vinculação disponível após conectar o Firebase.')
@@ -171,7 +195,21 @@ export async function connectPassword(password) {
   const user = auth.currentUser
   if (!user.email) throw new Error('Sua conta precisa de um e-mail para vincular uma senha.')
   const result = await linkWithCredential(user, EmailAuthProvider.credential(user.email, password))
-  store.user = result.user; notify('Senha do aplicativo definida. Os dois métodos acessam os mesmos dados.')
+  store.user = { uid: result.user.uid, email: result.user.email, displayName: result.user.displayName, providerData: result.user.providerData.map(provider => ({ ...provider })) }; notify('Senha do aplicativo definida. Os dois métodos acessam os mesmos dados.')
+}
+export async function changePassword(input) {
+  if (isDemo) throw new Error('A alteração de senha estará disponível após configurar o Firebase e a API na Vercel.')
+  if (!auth.currentUser) throw new Error('Entre novamente para alterar sua senha.')
+  const token = await auth.currentUser.getIdToken()
+  let response
+  try {
+    response = await fetch('/api/account/password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input) })
+  } catch { throw new Error('Não foi possível confirmar a alteração. Confira a conexão e tente entrar novamente antes de repetir.') }
+  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Serviço de alteração de senha indisponível. Use a aplicação publicada ou vercel dev para executar a API.')
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error || 'Não foi possível alterar a senha.')
+  if (!result.passwordChanged) throw new Error('Não foi possível confirmar a alteração da senha.')
+  return result
 }
 export async function reauthenticate(password) {
   if (isDemo) return
@@ -233,8 +271,9 @@ export function watchMembers() {
   return onSnapshot(membersBase(), snap => { store.members = snap.docs.map(d => ({ ...d.data(), id: d.id })) }, error => notify(errorMessage(error), 'error'))
 }
 export async function createMember(payload) {
+  requireUIAdmin()
   if (isDemo) {
-    if (store.members.some(m => m.email.toLowerCase() === payload.email.trim().toLowerCase())) throw new Error('Este e-mail já está cadastrado.')
+    if (store.members.some(m => m.active !== false && m.email.toLowerCase() === payload.email.trim().toLowerCase())) throw new Error('Este e-mail já está cadastrado.')
     store.members.push({ id: crypto.randomUUID(), name: payload.name, email: payload.email, role: payload.role, active: true }); saveDemo(); return
   }
   const token = await auth.currentUser.getIdToken()
@@ -242,4 +281,73 @@ export async function createMember(payload) {
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('API administrativa indisponível. Localmente use vercel dev; npm run dev inicia somente a interface.')
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Não foi possível criar o usuário.')
+}
+
+function requireUIAdmin() {
+  if (store.member?.role !== 'admin') throw new Error('Acesso exclusivo de administradores.')
+}
+async function adminCall(body) {
+  requireUIAdmin()
+  const token = await auth.currentUser.getIdToken()
+  const response = await fetch('/api/admin/manage', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) })
+  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('API administrativa indisponível. Use a aplicação publicada ou vercel dev.')
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error || 'Não foi possível concluir a operação.')
+  return result
+}
+export async function updateMember(uid, input) {
+  requireUIAdmin(); validId(uid)
+  const data = validateMemberEdit(input)
+  protectOwnAccount(store.user.uid, uid, 'edit', data.role)
+  if (!isDemo) return adminCall({ action: 'edit-account', uid, ...data })
+  const member = store.members.find(member => member.id === uid && member.active !== false)
+  if (!member) throw new Error('Conta não encontrada.')
+  if (store.members.some(member => member.id !== uid && member.active !== false && member.email.toLowerCase() === data.email)) throw new Error('Este e-mail já pertence a outra conta.')
+  Object.assign(member, data)
+  if (uid === store.user.uid) { Object.assign(store.member, data); store.user.email = data.email; store.user.displayName = data.name }
+  saveDemo()
+  return { updated: true }
+}
+export async function removeMember(uid) {
+  requireUIAdmin(); validId(uid); protectOwnAccount(store.user.uid, uid, 'delete')
+  if (!isDemo) return adminCall({ action: 'delete-account', uid })
+  const member = store.members.find(member => member.id === uid)
+  if (!member) throw new Error('Conta não encontrada.')
+  captureDemoProject()
+  member.active = false; member.deleted = true
+  Object.values(demoProjects).forEach(project => { project.memberIds = project.memberIds.filter(id => id !== uid) })
+  syncDemoRenovations(); persistDemo()
+  return { removed: true }
+}
+export async function linkMemberToRenovation(uid, renovationId) {
+  requireUIAdmin(); validId(uid); validId(renovationId)
+  if (!isDemo) return adminCall({ action: 'link-member', uid, renovationId })
+  if (!store.members.some(member => member.id === uid && member.active !== false)) throw new Error('Membro não encontrado.')
+  const project = demoProjects[renovationId]
+  if (!project || project.deleted) throw new Error('Reforma não encontrada.')
+  if (!project.memberIds.includes(uid) && project.memberIds.length >= 300) throw new Error('Selecione até 300 membros.')
+  captureDemoProject()
+  demoProjects[renovationId].memberIds = [...new Set([...demoProjects[renovationId].memberIds, uid])]
+  syncDemoRenovations(); persistDemo()
+  return { linked: true }
+}
+export async function updateRenovation(renovationId, input) {
+  requireUIAdmin(); validId(renovationId)
+  const data = validateRenovationEdit(input)
+  if (!isDemo) return adminCall({ action: 'edit-renovation', renovationId, ...data })
+  const project = demoProjects[renovationId]
+  if (!project || project.deleted) throw new Error('Reforma não encontrada.')
+  if (data.memberIds.some(uid => !store.members.some(member => member.id === uid && member.active !== false))) throw new Error('Membro não encontrado.')
+  captureDemoProject(); Object.assign(demoProjects[renovationId], data)
+  if (store.selectedRenovationId === renovationId) store.renovationName = data.name
+  syncDemoRenovations(); persistDemo()
+  return { updated: true }
+}
+export async function removeRenovation(renovationId) {
+  requireUIAdmin(); validId(renovationId)
+  if (!isDemo) return adminCall({ action: 'delete-renovation', renovationId })
+  if (!demoProjects[renovationId] || demoProjects[renovationId].deleted) throw new Error('Reforma não encontrada.')
+  captureDemoProject(); demoProjects[renovationId].deleted = true; demoProjects[renovationId].memberIds = []
+  syncDemoRenovations(); persistDemo()
+  return { removed: true }
 }

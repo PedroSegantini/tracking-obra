@@ -4,6 +4,7 @@ import Modal from './Modal.vue'
 import { store, saveExpense, notify } from '../store'
 import { parseMoney, inputMoney, today, paidCents, money } from '../lib/domain'
 import { errorMessage } from '../lib/errors'
+import { openDatePicker } from '../lib/date-picker'
 const existing = store.editing
 const form = reactive({ amount: existing ? inputMoney(existing.amountCents) : '', date: existing?.date || today(), categoryId: existing?.categoryId || '', paymentMethod: existing?.paymentMethod || 'pix', installments: existing?.installments || 1, paidInstallments: existing?.paidInstallments ?? 0, description: existing?.description || '' })
 const busy = ref(false), error = ref('')
@@ -24,7 +25,7 @@ async function submit() {
     <form class="form-stack" @submit.prevent="submit">
       <p class="muted">Registre o valor total da compra, mesmo quando parcelada.</p>
       <label>Valor total (R$)<input v-model="form.amount" inputmode="decimal" placeholder="0,00" required maxlength="20" autofocus /></label>
-      <div class="form-grid"><label>Data da compra<input v-model="form.date" type="date" min="1900-01-01" max="2199-12-31" required /></label><label>Categoria<select v-model="form.categoryId" required><option value="" disabled>Selecione</option><option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}{{ c.active ? '' : ' (desativada)' }}</option></select></label></div>
+      <div class="form-grid"><label>Data da compra<input v-model="form.date" type="date" @click="openDatePicker" min="1900-01-01" max="2199-12-31" required /></label><label>Categoria<select v-model="form.categoryId" required><option value="" disabled>Selecione</option><option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}{{ c.active ? '' : ' (desativada)' }}</option></select></label></div>
       <p v-if="!categories.length" class="hint">Crie ou reative uma categoria em Configurações antes de registrar.</p>
       <label>Forma de pagamento<select v-model="form.paymentMethod"><option value="pix">PIX/Débito</option><option value="credit">Crédito</option></select></label>
       <div v-if="form.paymentMethod === 'credit'" class="inset form-stack">

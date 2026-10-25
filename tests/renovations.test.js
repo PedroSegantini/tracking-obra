@@ -54,3 +54,49 @@ test('migração preserva dados locais do formato anterior', async () => {
   app.selectRenovation('main')
   assert.equal(app.store.budgetCents, 45600); assert.equal(app.store.expenses[0].description, 'Antes da atualização')
 })
+
+test('admin edita e remove contas sem permitir autoexclusão ou autorrebaixamento', async () => {
+  await app.createMember({ name: 'Pessoa', email: 'pessoa@example.com', password: 'senha-123456', role: 'user' })
+  const member = app.store.members.find(member => member.email === 'pessoa@example.com')
+  await app.updateMember(member.id, { name: 'Nome atualizado', email: 'novo@example.com', role: 'user' })
+  assert.equal(member.name, 'Nome atualizado')
+  await app.linkMemberToRenovation(member.id, 'main')
+  assert.ok(app.store.renovations.find(project => project.id === 'main').memberIds.includes(member.id))
+  await assert.rejects(app.removeMember('demo-admin'), /própria conta/)
+  await assert.rejects(app.updateMember('demo-admin', { name: 'Família', email: 'familia@exemplo.com', role: 'user' }), /próprio cargo/)
+  const oldExpenses = app.store.expenses.length
+  await app.removeMember(member.id)
+  assert.equal(member.active, false); assert.equal(app.store.expenses.length, oldExpenses)
+  assert.ok(!app.store.renovations.some(project => project.memberIds.includes(member.id)))
+})
+test('edição de reforma altera nome e vínculos preservando orçamento e gastos', async () => {
+  await app.saveBudget(500000)
+  const oldExpenses = app.store.expenses.length
+  await app.updateRenovation('main', { name: 'Casa reformada', memberIds: [] })
+  assert.equal(app.store.renovationName, 'Casa reformada'); assert.equal(app.store.budgetCents, 500000); assert.equal(app.store.expenses.length, oldExpenses)
+  await app.logout(); app.loginDemo(); assert.equal(app.store.renovationName, 'Casa reformada')
+})
+test('exclusão da reforma ativa seleciona outra e permite criar após excluir todas', async () => {
+  await app.createRenovation('Segunda obra')
+  const id = app.store.selectedRenovationId
+  await app.removeRenovation(id)
+  assert.equal(app.store.selectedRenovationId, 'main'); assert.equal(app.store.renovations.length, 1)
+  await app.removeRenovation('main')
+  assert.equal(app.store.selectedRenovationId, ''); assert.equal(app.store.renovations.length, 0); assert.equal(app.store.loadingData, false)
+  await app.createRenovation('Recomeço')
+  assert.equal(app.store.renovationName, 'Recomeço'); assert.equal(app.store.renovations.length, 1)
+  await app.logout(); app.loginDemo(); assert.equal(app.store.renovationName, 'Recomeço')
+})
+test('usuário comum não seleciona reforma sem vínculo nem gerencia contas e vínculos', async () => {
+  await app.updateRenovation('main', { name: 'Nossa reforma', memberIds: [] })
+  app.store.member.role = 'user'
+  assert.throws(() => app.selectRenovation('main'), /acesso/)
+  await assert.rejects(app.linkMemberToRenovation('demo-admin', 'main'), /administradores/)
+  await assert.rejects(app.removeRenovation('main'), /administradores/)
+})
+
+test('edição do próprio perfil local persiste após sair e entrar', async () => {
+  await app.updateMember('demo-admin', { name: 'Meu nome', email: 'meu@example.com', role: 'admin' })
+  await app.logout(); app.loginDemo()
+  assert.equal(app.store.member.name, 'Meu nome'); assert.equal(app.store.user.email, 'meu@example.com')
+})

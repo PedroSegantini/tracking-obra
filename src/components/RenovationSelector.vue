@@ -22,6 +22,7 @@ async function submit() {
     <span class="project-avatar"><Icon name="house" :size="19" /></span>
     <label class="sr-only" for="renovation-select">Selecionar reforma</label>
     <select id="renovation-select" :value="store.selectedRenovationId" :disabled="store.loadingData || store.expenseModal || busy" @change="change">
+      <option v-if="!store.selectedRenovationId" value="" disabled>Selecione uma reforma</option>
       <option v-for="project in store.renovations" :key="project.id" :value="project.id">{{ project.name }}</option>
       <option v-if="store.member?.role === 'admin'" value="__new__">+ Nova reforma</option>
     </select>
@@ -36,5 +37,5 @@ async function submit() {
 </template>
 <style scoped>
 .renovation-switch { display: flex; align-items: center; gap: 8px; padding: 8px; margin: 34px 0 28px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-alt); }
-.renovation-switch select { min-width: 0; flex: 1; padding: 9px 4px; border: 0; background: transparent; font-weight: 650; font-size: 12px; text-overflow: ellipsis; }
+.renovation-switch select { min-width: 0; flex: 1; padding: 9px 44px 9px 4px; border: 0; background-color: transparent; font-weight: 650; font-size: var(--font-body); text-overflow: ellipsis; }
 </style>

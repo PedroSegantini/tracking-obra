@@ -10,7 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js tests/renovations.test.js",
+    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js tests/renovations.test.js tests/password.test.js tests/administration.test.js",
     "test:rules": "node --test tests/rules.test.js",
     "bootstrap": "node --env-file=.env.admin scripts/bootstrap-admin.mjs"
   },
@@ -19,6 +19,7 @@
     "exceljs": "^4.4.0",
     "firebase": "12.0.0",
     "firebase-admin": "^14.5.0",
+    "nodemailer": "^10.2.1",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"
   },

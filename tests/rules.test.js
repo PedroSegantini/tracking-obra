@@ -1,7 +1,7 @@
 import test, { before, after, beforeEach } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing'
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, serverTimestamp, writeBatch, query, where } from 'firebase/firestore'
 let env
 before(async () => { env = await initializeTestEnvironment({ projectId: 'demo-tracking-obra', firestore: { rules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8'), host: '127.0.0.1', port: 8080 } }) })
 after(async () => { await env?.cleanup() })
@@ -9,7 +9,7 @@ beforeEach(async () => {
   await env.clearFirestore()
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore()
-    await setDoc(doc(db, 'renovations/main'), { name: 'Nossa reforma', budgetCents: 100000 })
+    await setDoc(doc(db, 'renovations/main'), { name: 'Nossa reforma', budgetCents: 100000, deleted: false, memberIds: ['member', 'admin'] })
     await setDoc(doc(db, 'renovations/main/members/member'), { role: 'user', active: true })
     await setDoc(doc(db, 'renovations/main/members/admin'), { role: 'admin', active: true })
     await setDoc(doc(db, 'renovations/main/categories/material'), { name: 'Material', active: true })
@@ -45,7 +45,7 @@ test('categoria inativa impede nova despesa e autor não pode ser alterado', asy
   await assertFails(updateDoc(doc(db, 'renovations/main/expenses/one'), { createdBy: 'admin', updatedAt: serverTimestamp(), updatedBy: 'member' }))
 })
 
-const project = (uid) => ({ name: 'Apartamento', budgetCents: 0, updatedBy: uid, updatedAt: serverTimestamp() })
+const project = (uid) => ({ name: 'Apartamento', budgetCents: 0, memberIds: [uid], deleted: false, updatedBy: uid, updatedAt: serverTimestamp() })
 test('só administrador com vínculo e claim cria reforma', async () => {
   const member = env.authenticatedContext('member').firestore()
   const fakeAdmin = env.authenticatedContext('admin', { role: 'user' }).firestore()
@@ -63,11 +63,31 @@ test('família lista e usa reformas; categoria deve pertencer à reforma selecio
   const admin = env.authenticatedContext('admin', { role: 'admin' }).firestore()
   await assertSucceeds(setDoc(doc(admin, 'renovations/second'), project('admin')))
   const member = env.authenticatedContext('member').firestore()
-  await assertSucceeds(getDocs(collection(member, 'renovations')))
+  await assertFails(getDocs(collection(member, 'renovations')))
+  await assertSucceeds(getDocs(query(collection(member, 'renovations'), where('deleted', '==', false), where('memberIds', 'array-contains', 'member'))))
+  await assertFails(getDoc(doc(member, 'renovations/second')))
+  await env.withSecurityRulesDisabled(async context => updateDoc(doc(context.firestore(), 'renovations/second'), { memberIds: ['member'] }))
   await assertFails(getDocs(collection(env.authenticatedContext('outsider').firestore(), 'renovations')))
   await assertFails(setDoc(doc(member, 'renovations/second/expenses/invalid'), expense()))
   await assertSucceeds(setDoc(doc(member, 'renovations/second/categories/material'), { name: 'Material', color: '#c08b38', active: true, createdBy: 'member', updatedBy: 'member', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
   await assertSucceeds(setDoc(doc(member, 'renovations/second/expenses/one'), expense()))
   await assertSucceeds(updateDoc(doc(member, 'renovations/second'), { budgetCents: 500000, updatedBy: 'member', updatedAt: serverTimestamp() }))
   await assertFails(setDoc(doc(member, 'renovations/second/members/member'), { role: 'admin', active: true }))
+})
+
+test('vínculo removido revoga dados e usuário não consegue atrelar a si mesmo', async () => {
+  const member = env.authenticatedContext('member').firestore()
+  await assertFails(updateDoc(doc(member, 'renovations/main'), { memberIds: ['member'], updatedBy: 'member', updatedAt: serverTimestamp() }))
+  await assertFails(updateDoc(doc(member, 'renovations/main'), { name: 'Nome alterado', updatedBy: 'member', updatedAt: serverTimestamp() }))
+  await env.withSecurityRulesDisabled(async context => updateDoc(doc(context.firestore(), 'renovations/main'), { memberIds: ['admin'] }))
+  await assertFails(getDocs(collection(member, 'renovations/main/expenses')))
+  await assertFails(updateDoc(doc(member, 'renovations/main'), { budgetCents: 123, updatedBy: 'member', updatedAt: serverTimestamp() }))
+})
+test('reforma excluída bloqueia conteúdo sem apagar o perfil administrativo', async () => {
+  const admin = env.authenticatedContext('admin', { role: 'admin' }).firestore()
+  await env.withSecurityRulesDisabled(async context => updateDoc(doc(context.firestore(), 'renovations/main'), { deleted: true, memberIds: [] }))
+  await assertSucceeds(getDoc(doc(admin, 'renovations/main/members/admin')))
+  await assertFails(getDocs(collection(admin, 'renovations/main/expenses')))
+  await assertFails(setDoc(doc(admin, 'renovations/main/categories/new'), { name: 'Nova', color: '#157154', active: true, createdBy: 'admin', updatedBy: 'admin', createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
+  await assertSucceeds(setDoc(doc(admin, 'renovations/new'), project('admin')))
 })

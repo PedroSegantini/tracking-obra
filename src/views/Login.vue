@@ -95,7 +95,7 @@ async function submit(method) {
   flex-shrink: 0;
   gap: 6px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--font-small);
   white-space: nowrap;
 }
 .login-heading {
@@ -126,7 +126,7 @@ async function submit(method) {
   align-items: center;
   gap: 14px;
   margin: 22px 0;
-  font-size: 12px;
+  font-size: var(--font-small);
   color: var(--muted);
 }
 .divider::before, .divider::after {

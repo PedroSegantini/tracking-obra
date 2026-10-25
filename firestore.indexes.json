@@ -1,1 +1,19 @@
-{"indexes": [], "fieldOverrides": []}
+{
+  "indexes": [
+    {
+      "collectionGroup": "renovations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "memberIds",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
