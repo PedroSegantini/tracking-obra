@@ -43,14 +43,13 @@ async function submit(method) {
           <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
         </button>
       </header>
-      <p v-if="store.demo" class="login-demo">Modo demonstração</p>
       <p v-if="store.configError" class="form-error" role="alert">{{ store.configError }}</p>
 
       <template v-if="!store.configError">
         <template v-if="!recovery">
           <button class="button secondary google-button" :disabled="busy" @click="submit('google')">
             <svg v-if="!store.demo" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21.8 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.5a4.8 4.8 0 0 1-2 3.1v2.6h3.3c1.9-1.8 3-4.4 3-7.6ZM12 22c2.7 0 5-.9 6.7-2.5l-3.3-2.6c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.1H3v2.7A10 10 0 0 0 12 22Zm-5.6-8.3a6 6 0 0 1 0-3.4V7.6H3a10 10 0 0 0 0 8.8l3.4-2.7ZM12 6.2c1.5 0 2.8.5 3.8 1.5l2.9-2.9A9.6 9.6 0 0 0 12 2a10 10 0 0 0-9 5.6l3.4 2.7C7.2 8 9.4 6.2 12 6.2Z"/></svg>
-            {{ store.demo ? 'Explorar demonstração' : 'Continuar com Google' }}
+            {{ store.demo ? 'Continuar' : 'Continuar com Google' }}
           </button>
           <div class="divider"><span>ou</span></div>
         </template>
@@ -119,12 +118,6 @@ async function submit(method) {
   .login-card h1 { font-size: 24px; }
   .is-recovery { flex-wrap: wrap; }
   .is-recovery .login-theme { margin-left: auto; }
-}
-.login-demo {
-  margin: -16px 0 24px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--muted);
 }
 .login-card > .form-error { margin-bottom: 20px; }
 .google-button { width: 100%; }

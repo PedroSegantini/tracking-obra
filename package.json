@@ -10,7 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js",
+    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js tests/renovations.test.js",
     "test:rules": "node --test tests/rules.test.js",
     "bootstrap": "node --env-file=.env.admin scripts/bootstrap-admin.mjs"
   },

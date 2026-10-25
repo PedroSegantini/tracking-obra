@@ -61,3 +61,8 @@ export function validateUserInput(body) {
   if (!['admin', 'user'].includes(role)) throw new Error('Cargo inválido.')
   return { name: name.trim(), email: email.trim().toLowerCase(), password, role }
 }
+
+export function validateRenovationName(value) {
+  if (typeof value !== 'string' || value.trim().length < 2 || value.trim().length > 80) throw new Error('O nome da reforma deve ter de 2 a 80 caracteres.')
+  return value.trim()
+}

@@ -4,8 +4,9 @@
 
 Ambiente: Node 22.23.2, npm 10.9.8, Java 17. Sem credenciais reais do projeto.
 
-- `npm test`: 16 testes aprovados, cobrindo cálculos total/parcial, centavos, datas, validações, Excel, duplicidades, geração/leitura de um arquivo Excel real, cargos, autorização e rollback do provisionamento.
-- Firestore Emulator 1.19.8, Firebase CLI 14.0.0: 5 testes aprovados. Visitantes/contas sem vínculo não acessam a reforma; membros alteram orçamento/criam despesas; não podem promover a si mesmos; administradores listam membros; banco rejeita valores, parcelas, datas e autores inválidos; categoria desativada preserva edição existente e bloqueia novos registros.
+- `npm test`: 19 testes aprovados, cobrindo cálculos total/parcial, centavos, datas, validações, Excel, duplicidades, geração/leitura de um arquivo Excel real, cargos, autorização e rollback do provisionamento.
+- Firestore Emulator 1.19.8, Firebase CLI 14.0.0: 7 testes aprovados. Visitantes/contas sem vínculo não acessam a reforma; membros alteram orçamento/criam despesas; não podem promover a si mesmos; administradores listam membros; banco rejeita valores, parcelas, datas e autores inválidos; categoria desativada preserva edição existente e bloqueia novos registros.
+- Testes de várias reformas: criação restrita, despesas/orçamento/categorias separados, seleção persistida e migração da demonstração anterior aprovados. As regras também verificam que categorias de outra reforma não autorizam um lançamento.
 - `npm run build`: compilação de produção aprovada.
 - Inicialização dos módulos Authentication e Firestore com configuração fictícia local: aprovada, sem acessar projeto real.
 - `npm audit`: zero vulnerabilidades conhecidas na árvore final na data da execução, 24/10/2026. Isso não substitui atualização contínua.
@@ -26,6 +27,16 @@ Login real, recuperação de senha entregue por e-mail, pop-up e vinculação Go
 - [ ] Vincular Google pela conta e-mail/senha e confirmar o mesmo UID/dados nos dois logins.
 - [ ] Autorizar Google existente pelo script e adicionar senha em Minha conta.
 - [ ] Recuperar senha e confirmar recebimento/funcionamento do e-mail.
+
+### Reformas
+
+- [ ] No admin, abrir dropdown lateral e criar uma reforma pelo item + Nova reforma.
+- [ ] Confirmar que a nova reforma começa sem gastos, com orçamento zero e as três categorias iniciais.
+- [ ] Alterar orçamento e adicionar despesa; trocar para a anterior e conferir separação.
+- [ ] Recarregar/entrar novamente e conferir restauração da última seleção.
+- [ ] Com user, selecionar as reformas e confirmar ausência de criação.
+- [ ] Confirmar que filtros, formulários e prévia de Excel não permanecem abertos ao trocar de reforma.
+- [ ] Se Firebase já existia, publicar as novas regras antes de usar a versão.
 
 ### Gastos e cálculo
 

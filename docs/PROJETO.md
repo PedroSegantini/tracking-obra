@@ -2,7 +2,7 @@
 
 ## Objetivo e escopo
 
-Registrar despesas no momento em que acontecem, pelo celular ou computador, e permitir que a família acompanhe o orçamento de uma única reforma. Idioma pt-BR, moeda BRL e uso com internet. Sem anexos, serviços bancários ou notificações nesta primeira versão.
+Registrar despesas no momento em que acontecem, pelo celular ou computador, e permitir que a família acompanhe o orçamento de cada reforma selecionada. Idioma pt-BR, moeda BRL e uso com internet. Sem anexos, serviços bancários ou notificações nesta primeira versão.
 
 ## Tecnologias e arquitetura
 
@@ -11,7 +11,7 @@ Vue 3 + JavaScript, componentes com `<template>` HTML e estilos CSS. Vite para d
 Fluxos:
 
 1. O navegador autentica no Firebase e recebe um UID/token.
-2. O vínculo `renovations/main/members/{uid}` autoriza acesso à reforma.
+2. O vínculo familiar `renovations/main/members/{uid}` autoriza acesso às reformas da mesma família.
 3. Operações diárias acessam Firestore diretamente, sob `firestore.rules`.
 4. Criação de usuários chama `POST /api/admin/users` com token Bearer.
 5. O servidor verifica token, revogação, cargo `admin` no token e vínculo administrativo ativo antes de usar Admin SDK.
@@ -23,6 +23,14 @@ O modo demo só é habilitado explicitamente com `VITE_APP_MODE=demo`. Em modo F
 ### Login
 
 Google e e-mail/senha, mostrar/ocultar senha, recuperação por e-mail. Sem cadastro público na interface. Contas desconhecidas que autenticarem pelo Google veem acesso pendente e não obtêm os dados. Firebase Auth ainda pode conter essas identidades: autenticação e autorização são verificações distintas.
+
+### Seleção de reforma
+
+O dropdown na sidebar lista as reformas da família e permite trocar a reforma ativa. Administradores também veem **+ Nova reforma**, que abre um formulário de nome. Cada reforma nasce com orçamento zero, sem despesas e com as três categorias iniciais. Somente administradores ativos com claim `role=admin` podem criar o documento no Firestore; a interface não é a única proteção.
+
+Todos os familiares autorizados acessam todas as reformas desta família. Não há permissões separadas por reforma nesta versão. A reforma selecionada é lembrada por usuário no navegador. Ao trocar, orçamento, categorias, despesas, gráficos, filtros, prévias de importação e formulários são reiniciados para o contexto correto. A seleção é bloqueada enquanto há edição de despesa aberta ou criação em andamento.
+
+A reforma antiga `main` continua no mesmo caminho. Os membros permanecem centralizados em `main/members` para manter compatibilidade com o bootstrap e a administração. As reformas não podem ser excluídas pela interface ou por gravação direta do cliente.
 
 ### Resumo `/`
 
@@ -59,20 +67,20 @@ Fundo neutro, informações monetárias em destaque, botões principais verde-es
 
 ## Modelo Firestore
 
-Todos os dados pertencem à reforma fixa `main`. A arquitetura usa coleções abaixo desse documento:
+Cada reforma possui seu próprio documento e subcoleções. Os membros da família ficam centralizados no caminho original:
 
 ```text
-renovations/main
-  members/{uid}
+renovations/{renovationId}
   categories/{categoryId}
   expenses/{expenseId}
+renovations/main/members/{uid}  # acesso familiar compartilhado
 ```
 
 ### Reforma
 
 | Campo | Tipo | Observação |
 |---|---|---|
-| name | string | Nossa reforma, definido no bootstrap |
+| name | string | Nome de 2–80 caracteres; Nossa reforma no bootstrap inicial |
 | budgetCents | inteiro | >= 0; zero = orçamento não definido |
 | updatedAt | timestamp | Servidor |
 | updatedBy | string | UID do último editor |
@@ -114,7 +122,9 @@ Não há coleção de parcelas: a quantidade paga representa as primeiras parcel
 
 | Ação | user | admin |
 |---|---|---|
-| Consultar e gerenciar orçamento | Sim | Sim |
+| Selecionar reforma | Sim | Sim |
+| Criar reforma | Não | Sim |
+| Consultar e gerenciar orçamento da reforma selecionada | Sim | Sim |
 | Consultar e gerenciar categorias | Sim | Sim |
 | Consultar, adicionar, editar e excluir despesas de qualquer membro | Sim | Sim |
 | Importar e exportar | Sim | Sim |
@@ -123,7 +133,7 @@ Não há coleção de parcelas: a quantidade paga representa as primeiras parcel
 | Criar usuários e atribuir cargo | Não | Sim, via API |
 | Alterar diretamente membros/cargos no Firestore | Não | Não |
 
-Regras negam qualquer outro caminho. Authentication sem vínculo ativo não permite acesso à reforma. Admin SDK ignora as regras Firestore; por isso o endpoint possui autorização própria. Retirar acesso exige desativar vínculo, desativar a conta no Authentication e revogar sessões conforme o guia.
+A listagem de reformas exige vínculo familiar ativo; a criação exige vínculo e claim administrativos. Regras negam qualquer outro caminho. Authentication sem vínculo ativo não permite acesso à reforma. Admin SDK ignora as regras Firestore; por isso o endpoint possui autorização própria. Retirar acesso exige desativar vínculo, desativar a conta no Authentication e revogar sessões conforme o guia.
 
 ## Cálculos
 
@@ -173,7 +183,7 @@ Aba `Despesas`, cabeçalhos: `ID`, `Data`, `Valor total`, `Categoria`, `Pagament
 
 ## Concorrência, limites e manutenção
 
-Firestore onSnapshot atualiza orçamento, categorias e despesas entre membros. Não há sincronização offline persistente. Operações concorrentes sobre a mesma despesa seguem a última gravação; autoria de criação é preservada. No modo demonstrativo, localStorage não é compartilhado nem é fonte de dados reais.
+Firestore onSnapshot atualiza orçamento, categorias e despesas entre membros. Não há sincronização offline persistente. Operações concorrentes sobre a mesma despesa seguem a última gravação; autoria de criação é preservada. No modo demonstrativo, localStorage não é compartilhado nem é fonte de dados reais. O formato anterior de uma única reforma é reconhecido automaticamente e preservado dentro de `main` ao salvar no novo formato com várias reformas.
 
 A primeira versão carrega toda a coleção de despesas autorizadas e filtra/pagina no navegador. Adequado ao pequeno projeto familiar; bases maiores exigirão consultas paginadas e agregações para economizar leituras. Não há cron jobs, Cloud Functions Firebase, Storage, anexos nem serviços pagos na arquitetura.
 
@@ -181,4 +191,4 @@ Dependências têm lockfile e overrides: `@firebase/app`/`app-compat` alinhados 
 
 ## Fora do escopo atual
 
-Múltiplas reformas, orçamentos por categoria, comprovantes, alertas, integração bancária, registro offline, contas por telefone/SMS, vencimento real das parcelas, fluxo de caixa por data de quitação, histórico completo de alterações, alteração de cargos/remoção de usuários pela interface e restauração de despesas excluídas.
+Permissões individuais por reforma, exclusão/renomeação de reformas, orçamentos por categoria, comprovantes, alertas, integração bancária, registro offline, contas por telefone/SMS, vencimento real das parcelas, fluxo de caixa por data de quitação, histórico completo de alterações, alteração de cargos/remoção de usuários pela interface e restauração de despesas excluídas.

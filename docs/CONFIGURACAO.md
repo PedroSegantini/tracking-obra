@@ -2,6 +2,16 @@
 
 Este guia conecta o código aos seus serviços. Não é necessário configurar nada para explorar a demonstração local. Nenhum recurso de produção, chave real, conta ou deploy foi criado automaticamente.
 
+## Atualização: seleção de várias reformas
+
+Se o Firebase já está configurado, publique novamente `firestore.rules` antes de usar esta atualização. As regras antigas só permitem acessar `main` e não permitem listar/criar outras reformas:
+
+```sh
+npx firebase-tools@14.0.0 deploy --only firestore:rules --project SEU_PROJECT_ID
+```
+
+Os dados e membros existentes permanecem nos caminhos originais, sem migração destrutiva e sem precisar refazer o bootstrap. A conta `admin` cria uma reforma em **+ Nova reforma** no dropdown lateral. O novo documento e as categorias iniciais são gravados atomicamente. Todos os familiares autorizados podem selecionar as reformas; somente administradores as criam. Não é necessário adicionar serviços, variáveis ou plano pago.
+
 ## 1. Preparar a máquina
 
 Use Node.js 22.12+ da linha 22 e npm. Se usa nvm, execute `nvm use` na pasta do projeto.
@@ -188,7 +198,7 @@ Este comando local exige suas credenciais administrativas. O familiar deve sair 
 - Firebase Spark e Vercel Hobby possuem cotas. Spark não é uma promessa de uso ilimitado; ao atingir limites, operações podem ser interrompidas em vez de continuar normalmente.
 - O caso é pessoal/não comercial. Use o subdomínio gratuito; domínio próprio pode ter custo de registro.
 - Não habilitamos faturamento nem recursos que exigem Blaze. Não habilite SMS ou serviços pagos para seguir este guia.
-- Acompanhe leituras/gravações no Firestore e uso da Vercel. A aplicação mantém listeners das despesas, portanto novas sessões leem os registros da reforma.
+- Acompanhe leituras/gravações no Firestore e uso da Vercel. A aplicação mantém a lista de reformas e listeners dos dados da reforma ativa; ao trocar, encerra os listeners da anterior. Novas sessões e trocas leem os registros da reforma selecionada.
 - Faça exportações periódicas. Exportação Excel é uma cópia dos lançamentos, não backup completo de contas/cargos/configurações. Exclusão na interface é definitiva.
 - Para retirar acesso, enquanto não há essa função na interface: desative a conta em Authentication, altere `active=false` no documento de membro e revogue as sessões/refresh tokens pelo Admin SDK conforme a documentação. Não dependa apenas de esconder um item do menu.
 - Se uma chave privada vazar, revogue a chave no Google Cloud, gere outra e atualize as variáveis; remover do último commit não remove o histórico.

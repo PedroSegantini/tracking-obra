@@ -1,6 +1,6 @@
 # Tracking Obra
 
-Controle familiar de uma reforma, feito com Vue 3, JavaScript, HTML/CSS, Firebase e Vercel.
+Controle familiar de reformas, feito com Vue 3, JavaScript, HTML/CSS, Firebase e Vercel.
 
 ## Começar agora, sem Firebase
 
@@ -13,7 +13,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Abra o endereço mostrado pelo Vite, normalmente http://127.0.0.1:5173. Clique em **Explorar demonstração**.
+Abra o endereço mostrado pelo Vite, normalmente http://127.0.0.1:5173. Clique em **Continuar** para explorar a prévia local. A interface não exibe avisos de demonstração; os dados continuam locais até configurar o Firebase.
 
 O `.env.local` de demonstração já foi preparado na entrega; o comando de cópia é útil em um novo checkout. Não substitua um arquivo que você já configurou com Firebase.
 
@@ -28,7 +28,8 @@ A demonstração usa dados fictícios, guardados no `localStorage` deste navegad
 ## Implementado
 
 - Login por Google e e-mail/senha, recuperação e vinculação dos métodos.
-- Acesso à mesma reforma somente para membros autorizados.
+- Seleção de reformas da família por dropdown, com dados separados; criação exclusiva para admin.
+- Acesso às reformas somente para familiares autorizados.
 - Perfis `admin` e `user`, criação de contas via API protegida e listagem administrativa.
 - Despesas com edição, exclusão, filtros e paginação.
 - Crédito com parcelas totais e quantidade já paga.
@@ -71,6 +72,10 @@ firestore.rules           Autorização e validação no banco
 tests/                    Verificações automatizadas
 docs/                     Planejamento e guias
 ```
+
+## Atualização das regras
+
+Se o Firebase já estava configurado, publique novamente `firestore.rules` para habilitar a seleção e criação de reformas. Os dados da reforma original `main` são preservados. Veja o início do [guia de configuração](docs/CONFIGURACAO.md).
 
 ## Antes do GitHub
 
