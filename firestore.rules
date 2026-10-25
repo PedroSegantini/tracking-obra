@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function memberPath() { return /databases/$(database)/documents/renovations/main/members/$(request.auth.uid); }
+    function isMember() { return signedIn() && exists(memberPath()) && get(memberPath()).data.active == true; }
+    function isAdmin() { return isMember() && get(memberPath()).data.role == 'admin' && request.auth.token.role == 'admin'; }
+    function auditCreate(d) {
+      return d.createdBy == request.auth.uid && d.createdAt == request.time && d.updatedBy == request.auth.uid && d.updatedAt == request.time;
+    }
+    function auditUpdate(d) {
+      return d.createdBy == resource.data.createdBy && d.createdAt == resource.data.createdAt && d.updatedBy == request.auth.uid && d.updatedAt == request.time;
+    }
+    function validCategory(d) {
+      return d.keys().hasAll(['name', 'color', 'active', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && d.keys().hasOnly(['name', 'color', 'active', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && d.name is string && d.name.size() >= 2 && d.name.size() <= 60
+        && d.color is string && d.color.matches('^#[0-9a-fA-F]{6}$') && d.active is bool;
+    }
+    function categoryExists(d) { return exists(/databases/$(database)/documents/renovations/main/categories/$(d.categoryId)); }
+    function activeCategory(d) { return get(/databases/$(database)/documents/renovations/main/categories/$(d.categoryId)).data.active == true; }
+    function validExpense(d) {
+      return d.keys().hasAll(['amountCents', 'date', 'categoryId', 'paymentMethod', 'installments', 'paidInstallments', 'description', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt'])
+        && d.keys().hasOnly(['amountCents', 'date', 'categoryId', 'paymentMethod', 'installments', 'paidInstallments', 'description', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt'])
+        && d.amountCents is int && d.amountCents > 0 && d.amountCents <= 100000000000
+        && d.date is string && (d.date.matches('^(19|20|21)[0-9]{2}-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-8]))$') || d.date.matches('^(2000|(19|20|21)(0[48]|[2468][048]|[13579][26]))-02-29$'))
+        && d.categoryId is string && d.categoryId.matches('^[a-z0-9-]{1,60}$') && categoryExists(d)
+        && d.paymentMethod in ['pix', 'credit'] && d.installments is int && d.installments >= 1 && d.installments <= 600
+        && d.paidInstallments is int && d.paidInstallments >= 0 && d.paidInstallments <= d.installments
+        && (d.paymentMethod == 'credit' || (d.installments == 1 && d.paidInstallments == 1))
+        && d.description is string && d.description.size() <= 500;
+    }
+    match /renovations/main {
+      allow read: if isMember();
+      allow create, delete: if false;
+      allow update: if isMember()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['budgetCents', 'updatedAt', 'updatedBy'])
+        && request.resource.data.budgetCents is int && request.resource.data.budgetCents >= 0 && request.resource.data.budgetCents <= 100000000000
+        && request.resource.data.updatedAt == request.time && request.resource.data.updatedBy == request.auth.uid;
+      match /members/{uid} {
+        allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+        allow list: if isAdmin();
+        allow write: if false;
+      }
+      match /categories/{id} {
+        allow read: if isMember();
+        allow create: if isMember() && id.matches('^[a-z0-9-]{1,60}$') && validCategory(request.resource.data) && request.resource.data.active == true && auditCreate(request.resource.data);
+        allow update: if isMember() && validCategory(request.resource.data) && auditUpdate(request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt', 'updatedBy']);
+        allow delete: if false;
+      }
+      match /expenses/{id} {
+        allow read: if isMember();
+        allow create: if isMember() && validExpense(request.resource.data) && activeCategory(request.resource.data) && auditCreate(request.resource.data);
+        allow update: if isMember() && validExpense(request.resource.data) && auditUpdate(request.resource.data)
+          && (request.resource.data.categoryId == resource.data.categoryId || activeCategory(request.resource.data));
+        allow delete: if isMember();
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

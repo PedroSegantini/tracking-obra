@@ -1,0 +1,38 @@
+{
+  "name": "tracking-obra",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/domain.test.js tests/excel.test.js tests/admin.test.js",
+    "test:rules": "node --test tests/rules.test.js",
+    "bootstrap": "node --env-file=.env.admin scripts/bootstrap-admin.mjs"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.61.0",
+    "exceljs": "^4.4.0",
+    "firebase": "12.0.0",
+    "firebase-admin": "^14.5.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "vite": "^8.3.5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6",
+    "exceljs": {
+      "uuid": "^11.1.1"
+    },
+    "@firebase/app": "0.14.0",
+    "@firebase/app-compat": "0.5.0"
+  }
+}
